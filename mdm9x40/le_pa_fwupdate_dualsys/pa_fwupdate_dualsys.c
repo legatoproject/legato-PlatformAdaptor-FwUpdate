@@ -18,8 +18,15 @@
 #include <linux/reboot.h>
 
 
+// Tools from mtd-utils package
 #define FLASH_ERASE        "/usr/sbin/flash_erase"
 #define NANDWRITE          "/usr/sbin/nandwrite"
+
+// SBL number of passes needed to flash low/high and high/low SBL scrub
+#define SBL_MAX_PASS              2
+
+// Command buffer length used for popen(3) and system(3)
+#define CMD_BUFFER_LENGTH       256
 
 //==================================================================================================
 //                                       Static variables
@@ -205,6 +212,13 @@ static const char imagestring [CWE_IMAGE_TYPE_COUNT][sizeof(uint32_t)] =
 
 //--------------------------------------------------------------------------------------------------
 /**
+ * Memory Pool for SBL temporary image
+ */
+//--------------------------------------------------------------------------------------------------
+static le_mem_PoolRef_t   SBLImgPool;
+
+//--------------------------------------------------------------------------------------------------
+/**
  * Information of a MTD partition read form /sys/class/mtd directory
  */
 //--------------------------------------------------------------------------------------------------
@@ -237,6 +251,23 @@ static size_t  ImageSize = 0;
  */
 //--------------------------------------------------------------------------------------------------
 static char    *MtdNamePtr = NULL;
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Pointer to the RAW image space used for SBL scrub
+ */
+//--------------------------------------------------------------------------------------------------
+static uint8_t *RawImagePtr = NULL;
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * SBL preamble to be found at 0 of any first valid block
+ */
+//--------------------------------------------------------------------------------------------------
+static const unsigned char pa_fwupdate_SBLPreamble[8] = {
+    0xd1, 0xdc, 0x4b, 0x84,
+    0x34, 0x10, 0xd7, 0x73,
+};
 
 //--------------------------------------------------------------------------------------------------
 /**
@@ -593,6 +624,221 @@ static int GetMtdFromImageType
 
 //--------------------------------------------------------------------------------------------------
 /**
+ * Write data into SBL (SBL scrub)
+ *
+ * @return
+ *      - LE_OK on success
+ *      - LE_FAULT on failure
+ */
+//--------------------------------------------------------------------------------------------------
+static le_result_t WriteDataSBL
+(
+    pa_fwupdate_ImageFormat_t format,   ///< [IN] Component image format linked to data
+    pa_fwupdate_CweHeader_t* hdr,       ///< [IN] Component image header
+    size_t *length,                     ///< [IN] Input data length
+    size_t offset,                      ///< [IN] Data offset in the package
+    uint8_t* data                       ///< [IN] intput data
+)
+{
+    int mtdNum;
+    pa_fwupdate_MtdInfo_t mtdInfo;
+    le_result_t res = LE_OK;
+    int sblNbBlk, sblMaxBlk;
+
+    mtdNum = GetMtdFromImageType( hdr->ImageType, 1, &MtdNamePtr, &mtdInfo );
+
+    LE_DEBUG ("Format %d image type %d len %d offset %d",
+              format, hdr->ImageType, *length, offset);
+
+    if( -1 == mtdNum )
+    {
+        LE_ERROR( "Unable to find a valid mtd for image type %d\n", hdr->ImageType );
+        return LE_FAULT;
+    }
+
+    sblNbBlk = (hdr->ImageSize + mtdInfo.eraseSize - 1) / mtdInfo.eraseSize;
+    sblMaxBlk = mtdInfo.nbBlk - sblNbBlk;
+
+    if (ImageSize == 0)
+    {
+        LE_INFO ("Writing \"%s\" (mtd%d) from CWE image %d, size %d\n",
+                 MtdNamePtr, mtdNum, hdr->ImageType, hdr->ImageSize );
+
+        // Check that SBL is not greater than the max block for the partition.
+        if (sblNbBlk > ((mtdInfo.nbBlk / 2) + 1))
+        {
+            LE_ERROR("SBL is too big: %d (nbBlock %d)",
+                     ImageSize, (ImageSize / mtdInfo.eraseSize));
+            goto error;
+        }
+
+        // Allocate a block to store the SBL temporary image
+        ImageSize = hdr->ImageSize;
+        RawImagePtr = (uint8_t *) le_mem_ForceAlloc(SBLImgPool);
+    }
+
+    // Check that the chunck is inside the SBL temporary image
+    if ((offset + *length) > ImageSize)
+    {
+        LE_ERROR("SBL image size and offset/length mismatch: %u < %u+%u",
+                 ImageSize, offset, *length);
+        goto error;
+    }
+
+    memcpy( RawImagePtr + offset, data, *length );
+
+    if ((*length + offset) >= ImageSize )
+    {
+        int rc;
+        int sblBlk; // Base of SBL first block
+        int nbBlk;
+        int atBlk = -1;
+        int atOffset = -1;
+        int pass = 0;
+        char cmdBuf[CMD_BUFFER_LENGTH];
+        FILE *mtdFd;
+
+        snprintf( cmdBuf, sizeof(cmdBuf), "/dev/mtd%d", mtdNum );
+        if (NULL == (mtdFd = fopen( cmdBuf, "r" )))
+        {
+            LE_ERROR("Open of MTD %s fails: %m\n", cmdBuf );
+            goto error;
+        }
+        /* Fetch if a valid SBL exists and get its first block */
+        for (sblBlk = 0; sblBlk <= sblMaxBlk; sblBlk++ )
+        {
+            unsigned char sbl[sizeof(pa_fwupdate_SBLPreamble)];
+
+            if (fseek( mtdFd, sblBlk * mtdInfo.eraseSize, SEEK_SET ))
+            {
+                LE_ERROR("fseek() at offset %d fails: %m", sblBlk * mtdInfo.eraseSize );
+                fclose( mtdFd );
+                goto error;
+            }
+            if (fread( sbl, sizeof(sbl), 1, mtdFd ) != 1)
+            {
+                LE_ERROR("Read of SBL at sector %d fails: %m", sblBlk );
+                fclose( mtdFd );
+                goto error;
+            }
+            if (0 == memcmp( sbl, pa_fwupdate_SBLPreamble, sizeof(sbl) ))
+            {
+                LE_INFO("SBL base found at block %d\n", sblBlk );
+                break;
+            }
+        }
+        fclose( mtdFd );
+
+        if (sblBlk > sblMaxBlk)
+        {
+            // No valid SBL found in the partition. So we use the base at block 0
+            LE_ERROR("No valid SBL signature found. Ignoring and assuming SBL at 0");
+            sblBlk = 0;
+        }
+        else if (sblBlk && (sblBlk < (mtdInfo.nbBlk / 2)))
+        {
+            // If SBL is a lower block, (0..3), SBL is assumed to be in low.
+            // Update SBL base according to this.
+            sblBlk = 0;
+        }
+        LE_INFO("Flashing SBL scrub: Size %d, base %d, nbblk %d\n",
+                ImageSize, sblBlk, sblNbBlk );
+
+        // Keep at least one block for spare
+        sblMaxBlk--;
+
+        do
+        {
+            // Erase all blocks related to the SBL starting first block
+            atOffset = (!pass ?
+                        (sblBlk ? 0 : sblMaxBlk) : sblBlk) * mtdInfo.eraseSize;
+            snprintf(cmdBuf, sizeof(cmdBuf), FLASH_ERASE " /dev/mtd%d 0x%08x %u >/dev/null",
+                     mtdNum, atOffset, sblNbBlk);
+            LE_INFO("(%d)cmd: %s\n", pass, cmdBuf);
+            rc = system(cmdBuf);
+            if (WEXITSTATUS(rc))
+            {
+                LE_ERROR ("(%d)Flash erase failed: %d\n", pass, WEXITSTATUS(rc));
+                goto error;
+            }
+
+            // Flash by block loop from last SBL block to first SBL block
+            // If SBL base is high, flash the low before, and recopy to high
+            // If SBL base is low, flash the high before, and recopy to low
+            for( atBlk = (!pass ?
+                          (sblBlk ? 0 : sblMaxBlk) : sblBlk) + sblNbBlk - 1,
+                 nbBlk = 0;
+                 nbBlk < sblNbBlk;
+                 nbBlk++, atBlk-- )
+            {
+                atOffset = atBlk * mtdInfo.eraseSize;
+                LE_DEBUG("(%d)sblBlk = %d, atBlk = %d, atOffset = 0x%08x\n",
+                        pass, sblBlk, atBlk, atOffset);
+
+                // Flash blocks related to the SBL starting last block
+                snprintf(cmdBuf, sizeof(cmdBuf), NANDWRITE " -s %u -p /dev/mtd%d - >/dev/null",
+                         atOffset, mtdNum);
+                LE_INFO("(%d)Popen to %s\n", pass, cmdBuf);
+                LE_DEBUG("(%d)fwrite( offset=%x, length=%d )\n", pass,
+                        ((sblNbBlk - nbBlk - 1) * mtdInfo.eraseSize),
+                        nbBlk ? mtdInfo.eraseSize :
+                                (ImageSize - ((sblNbBlk - nbBlk - 1) * mtdInfo.eraseSize)));
+                FdNandWrite = popen( cmdBuf, "we" );
+                if (NULL == FdNandWrite)
+                {
+                    LE_ERROR ("(%d)popen to nandwrite failed : %m\n", pass);
+                    goto error;
+                }
+                if (1 != fwrite( RawImagePtr + ((sblNbBlk - nbBlk - 1) * mtdInfo.eraseSize),
+                                 mtdInfo.eraseSize, 1, FdNandWrite) )
+                {
+                    LE_ERROR("(%d)fwrite to nandwrite fails: %m\n", pass);
+                    goto error;
+                }
+                pclose( FdNandWrite );
+                FdNandWrite = NULL;
+            }
+            // Do low and high or high and low: 2 passes
+        } while (++pass < SBL_MAX_PASS);
+
+        atOffset = (sblBlk ? 0 : sblMaxBlk) * mtdInfo.eraseSize;
+
+        // Erase blocks related to the temporary SBL: high if SBL low; low if SBL is high
+        snprintf(cmdBuf, sizeof(cmdBuf), FLASH_ERASE " /dev/mtd%d 0x%08x %u >/dev/null",
+                 mtdNum, atOffset, sblNbBlk);
+        LE_INFO( "(E)cmd: %s\n", cmdBuf);
+        rc = system(cmdBuf);
+        if (WEXITSTATUS(rc))
+        {
+             LE_ERROR ("(E)Flash erase failed: %d\n", WEXITSTATUS(rc));
+             goto error;
+        }
+
+        le_mem_Release(RawImagePtr);
+        RawImagePtr = NULL;
+        ImageSize = 0;
+        FdNandWrite = NULL;
+        LE_INFO("Update for partiton %s done with return %d\n",
+                MtdNamePtr, res);
+        MtdNamePtr = NULL;
+    }
+
+    return res;
+error:
+    if( RawImagePtr )
+    {
+        le_mem_Release(RawImagePtr);
+    }
+    RawImagePtr = NULL;
+    ImageSize = 0;
+    FdNandWrite = NULL;
+    LE_ERROR("Update for partiton %s failed with return %d\n",
+             MtdNamePtr, LE_FAULT);
+    MtdNamePtr = NULL;
+    return LE_FAULT;
+}
+//--------------------------------------------------------------------------------------------------
+/**
  * Write data in a partition
  *
  * @return
@@ -613,13 +859,19 @@ static le_result_t WriteData
     le_result_t ret = LE_OK;
     pa_fwupdate_MtdInfo_t mtdInfo;
 
-    LE_DEBUG ("WriteData format %d image type %d len %d offset %d",
+    LE_DEBUG ("Format %d image type %d len %d offset %d",
               format, hdr->ImageType, *length, offset);
+
+    if (hdr->ImageType == CWE_IMAGE_TYPE_SBL1 )
+    {
+        // SBL is managed by a specific flash scheme
+        return WriteDataSBL( format, hdr, length, offset, data );
+    }
 
     if ((0 == offset) && (NULL == FdNandWrite) && (0 == ImageSize) )
     {
         int mtdNum;
-        char cmdBuf[256];
+        char cmdBuf[CMD_BUFFER_LENGTH];
 
         mtdNum = GetMtdFromImageType( hdr->ImageType, 1, &MtdNamePtr, &mtdInfo );
 
@@ -628,7 +880,7 @@ static le_result_t WriteData
             LE_ERROR( "Unable to find a valid mtd for image type %d\n", hdr->ImageType );
             return LE_FAULT;
         }
-        LE_INFO ("WriteData: Writing \"%s\" (mtd%d) from CWE image %d\n",
+        LE_INFO ("Writing \"%s\" (mtd%d) from CWE image %d\n",
                  MtdNamePtr, mtdNum, hdr->ImageType );
 
         /* erase the flash blocks related to the MTD mtdNum */
@@ -654,7 +906,6 @@ static le_result_t WriteData
         ImageSize = hdr->ImageSize;
     }
 
-    LE_DEBUG( "fwrite( %d )\n", *length );
     if (1 != fwrite( data, *length, 1, FdNandWrite) )
     {
         LE_ERROR( "fwrite to nandwrite fails: %m\n" );
@@ -666,7 +917,7 @@ static le_result_t WriteData
         pclose( FdNandWrite );
         ImageSize = 0;
         FdNandWrite = NULL;
-        LE_INFO( "pa_DualSys_WriteData for partiton %s done with return %d\n", MtdNamePtr, ret );
+        LE_INFO( "Update for partiton %s done with return %d\n", MtdNamePtr, ret );
         MtdNamePtr = NULL;
     }
     return ret;
@@ -1328,6 +1579,13 @@ size_t pa_fwupdate_ImageData
 {
     size_t result = 0;
 
+    /* Check incoming parameters */
+    if (CweHeader == NULL)
+    {
+        LE_ERROR ("bad parameters");
+        return 0;
+    }
+
     LE_DEBUG ("imagetype %d, CurrentImageOffset %d length %d, CurrentImageSize %d",
                 CweHeader->ImageType,
                 (uint32_t)CurrentImageOffset,
@@ -1586,5 +1844,18 @@ COMPONENT_INIT
     /* Allocate a pool for the data chunk */
     ChunkPool = le_mem_CreatePool("ChunkPool", CHUNK_LENGTH);
     le_mem_ExpandPool(ChunkPool, 1);
+
+    int mtdNum;
+    pa_fwupdate_MtdInfo_t mtdInfo;
+
+    /* Get MTD information from SBL partition. This is will be used to fix the
+       pool object size and compute the max object size */
+    mtdNum = GetMtdFromImageType( CWE_IMAGE_TYPE_SBL1, 1, &MtdNamePtr, &mtdInfo );
+    LE_FATAL_IF(-1 == mtdNum, "Unable to find a valid mtd for SBL image\n");
+
+    /* Allocate a pool for the SBL image */
+    SBLImgPool = le_mem_CreatePool("SBLImgagePool",
+                                   (mtdInfo.nbBlk / 2) * mtdInfo.eraseSize);
+    le_mem_ExpandPool(SBLImgPool, 1);
 }
 
