@@ -96,6 +96,20 @@ static bool IsFirstDataWritten = false;
 
 //--------------------------------------------------------------------------------------------------
 /**
+ * Boolean to know if a NVUP file(s) has been downloaded
+ */
+//--------------------------------------------------------------------------------------------------
+static bool IsFirstNvupDownloaded;
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Boolean to know if a modem partition has been downloaded
+ */
+//--------------------------------------------------------------------------------------------------
+static bool IsModemDownloaded;
+
+//--------------------------------------------------------------------------------------------------
+/**
  * CRC table
  */
 //--------------------------------------------------------------------------------------------------
@@ -837,6 +851,56 @@ error:
     MtdNamePtr = NULL;
     return LE_FAULT;
 }
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Write NVUP files in backup partition by calling QMI commands
+ *
+ * @return
+ *      - LE_OK on success
+ *      - LE_FAULT on failure
+ */
+//--------------------------------------------------------------------------------------------------
+static le_result_t WriteNvup
+(
+    pa_fwupdate_CweHeader_t* hdr,       ///< [IN] Component image header
+    size_t *length,                     ///< [IN] Input data length
+    size_t offset,                      ///< [IN] Data offset in the package
+    uint8_t* data                       ///< [IN] intput data
+)
+{
+    le_result_t result;
+    bool isEnd;
+
+    LE_INFO("Writing NVUP file ...");
+    LE_DEBUG("length=%d offset=%d", *length, offset);
+
+    if (IsFirstNvupDownloaded == false)
+    {
+        /* first NVUP file => ask to delete NVUP files */
+        result = pa_fwupdate_NvupDelete();
+        if (result != LE_OK)
+        {
+            LE_ERROR("NVUP delete has failed");
+            return LE_FAULT;
+        }
+        IsFirstNvupDownloaded = true;
+    }
+
+    if ((ImageSize == 0) && (offset == 0))
+    {
+        ImageSize = hdr->ImageSize;
+        LE_DEBUG("ImageSize=%d", ImageSize);
+    }
+
+    isEnd = (*length + offset >= ImageSize) ? true : false;
+    LE_DEBUG("isEnd=%d", isEnd);
+
+    result = pa_fwupdate_NvupWrite(*length, data, isEnd);
+
+    return result;
+}
+
 //--------------------------------------------------------------------------------------------------
 /**
  * Write data in a partition
@@ -861,6 +925,12 @@ static le_result_t WriteData
 
     LE_DEBUG ("Format %d image type %d len %d offset %d",
               format, hdr->ImageType, *length, offset);
+
+    /* image type "FILE" must be considered as NVUP file */
+    if (hdr->ImageType == CWE_IMAGE_TYPE_FILE)
+    {
+        return WriteNvup(hdr, length, offset, data);
+    }
 
     if (hdr->ImageType == CWE_IMAGE_TYPE_SBL1 )
     {
@@ -948,6 +1018,8 @@ static void ParamsInit
     IsImageToBeRead = false;
     IsOngoing = false;
     IsFirstDataWritten = false;
+    IsFirstNvupDownloaded = false;
+    IsModemDownloaded = false;
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -1651,6 +1723,10 @@ size_t pa_fwupdate_ImageData
                             (uint32_t)CurrentImageOffset, CweHeader->ImageType);
             }
             IsImageToBeRead = false;
+            if (CweHeader->ImageType == CWE_IMAGE_TYPE_MODM)
+            {
+                IsModemDownloaded = true;
+            }
         }
     }
 
@@ -1767,16 +1843,35 @@ le_result_t pa_fwupdate_Download
                             }
                             else
                             {
-                                result = LE_FAULT;
-                                /* Done with the file, so close it. */
-                                close(fd);
-                                break;
+                                goto error;
                             }
                         }
                         else if (!readCount)
                         {
                             LE_DEBUG ("Read %zd bytes in total", totalCount);
-                            result = LE_OK;
+                            if (IsModemDownloaded != IsFirstNvupDownloaded)
+                            {
+                                /* a modem as been downloaded but no nvup files
+                                 * OR
+                                 * nvup files have been downloaded but no modem
+                                 *
+                                 * => delete the NVUP files
+                                 */
+                                pa_fwupdate_NvupDelete();
+                                if (IsModemDownloaded)
+                                {
+                                    LE_ERROR("Bad package: MODEM without NVUP");
+                                }
+                                else
+                                {
+                                    LE_ERROR("Bad package: NVUP without MODEM");
+                                }
+                                result = LE_FAULT;
+                            }
+                            else
+                            {
+                                result = LE_OK;
+                            }
                             /* Done with the file, so close it. */
                             close(fd);
                             break;
@@ -1784,10 +1879,7 @@ le_result_t pa_fwupdate_Download
                         else
                         {
                             LE_ERROR ("Error while reading fd=%i : %m", fd);
-                            result = LE_FAULT;
-                            /* Done with the file, so close it. */
-                            close (fd);
-                            break;
+                            goto error;
                         }
                     }
                 }
@@ -1807,6 +1899,15 @@ le_result_t pa_fwupdate_Download
 
     LE_DEBUG ("result %d", result);
     return result;
+error:
+    if (IsFirstNvupDownloaded)
+    {
+        /* almost one NVUP file has been downloaded => delete it */
+        pa_fwupdate_NvupDelete();
+    }
+    /* Done with the file, so close it. */
+    close (fd);
+    return LE_FAULT;
 }
 
 //--------------------------------------------------------------------------------------------------
