@@ -187,7 +187,7 @@ static const unsigned int Crc32Table[256] =
  * The order of entries in this table must match the order of the enums in pa_fwupdate_ImageType_t
  */
 //--------------------------------------------------------------------------------------------------
-static const char imagestring [CWE_IMAGE_TYPE_COUNT][sizeof(uint32_t)] =
+static const char ImageString [CWE_IMAGE_TYPE_COUNT][sizeof(uint32_t)] =
 {
     { 'Q', 'P', 'A', 'R' },     ///<  partition
     { 'S', 'B', 'L', '1' },     ///<  SBL1
@@ -250,7 +250,7 @@ typedef struct pa_fwupdate_MtdInfo {
  * Nand Write file descriptor
  */
 //--------------------------------------------------------------------------------------------------
-static FILE    *FdNandWrite = NULL;
+static FILE* FdNandWrite = NULL;
 
 //--------------------------------------------------------------------------------------------------
 /**
@@ -264,14 +264,14 @@ static size_t  ImageSize = 0;
  * Pointer to the MTD name
  */
 //--------------------------------------------------------------------------------------------------
-static char    *MtdNamePtr = NULL;
+static char* MtdNamePtr = NULL;
 
 //--------------------------------------------------------------------------------------------------
 /**
  * Pointer to the RAW image space used for SBL scrub
  */
 //--------------------------------------------------------------------------------------------------
-static uint8_t *RawImagePtr = NULL;
+static uint8_t* RawImagePtr = NULL;
 
 //--------------------------------------------------------------------------------------------------
 /**
@@ -288,7 +288,7 @@ static const unsigned char pa_fwupdate_SBLPreamble[8] = {
  * Partition Name and Image Type matrix
  */
 //--------------------------------------------------------------------------------------------------
-static char *pa_fwupdate_PartNamePtr[2][ CWE_IMAGE_TYPE_COUNT ] = {
+static char* pa_fwupdate_PartNamePtr[2][ CWE_IMAGE_TYPE_COUNT ] = {
     {
         NULL,
         "sbl",
@@ -377,30 +377,30 @@ static char *pa_fwupdate_PartNamePtr[2][ CWE_IMAGE_TYPE_COUNT ] = {
 //--------------------------------------------------------------------------------------------------
 static le_result_t GetInitialBootSystemByUbi
 (
-   int *MtdNumPtr ///< [OUT] the MTD number used for rootfs (ubi0)
+   int* mtdNumPtr ///< [OUT] the MTD number used for rootfs (ubi0)
 )
 {
-    FILE *mtdFd;
+    FILE* mtdFdPtr;
     le_result_t le_result = LE_OK;
 
     // Try to open the MTD belonging to ubi0
-    if( NULL == (mtdFd = fopen( "/sys/class/ubi/ubi0/mtd_num", "r" )) )
+    if( NULL == (mtdFdPtr = fopen( "/sys/class/ubi/ubi0/mtd_num", "r" )) )
     {
         LE_ERROR( "Unable to determine ubi0 mtd device: %m\n" );
         le_result = LE_FAULT;
         goto end;
     }
     // Read the MTD number
-    if( 1 != fscanf( mtdFd, "%d", MtdNumPtr ) )
+    if( 1 != fscanf( mtdFdPtr, "%d", mtdNumPtr ) )
     {
         LE_ERROR( "Unable to determine ubi0 mtd device: %m\n" );
         le_result = LE_FAULT;
     }
     else
     {
-        LE_DEBUG( "GetInitialBootSystemByUbi: %d\n", *MtdNumPtr );
+        LE_DEBUG( "GetInitialBootSystemByUbi: %d\n", *mtdNumPtr );
     }
-    fclose( mtdFd );
+    fclose( mtdFdPtr );
 end:
     return le_result;
 }
@@ -417,30 +417,30 @@ end:
 //--------------------------------------------------------------------------------------------------
 static le_result_t GetImageTypeFromMtd
 (
-    int MtdNum,                             ///< [IN] the MTD number
-    char **MtdNamePtr,                      ///< [OUT] the partition name
-    pa_fwupdate_ImageType_t *ImageTypePtr   ///< [OUT] the partition type
+    int mtdNum,                             ///< [IN] the MTD number
+    char** mtdNamePtr,                      ///< [OUT] the partition name
+    pa_fwupdate_ImageType_t* imageTypePtr   ///< [OUT] the partition type
 )
 {
-    FILE *mtdFd;
+    FILE* mtdFdPtr;
     char mtdBuf[100], mtdFetchName[16];
     int partIndex, partSystem;
 
     // Open the partition name belonging the given MTD number
-    snprintf( mtdBuf, sizeof(mtdBuf), "/sys/class/mtd/mtd%d/name", MtdNum );
-    if( NULL == (mtdFd = fopen( mtdBuf, "r" )) )
+    snprintf( mtdBuf, sizeof(mtdBuf), "/sys/class/mtd/mtd%d/name", mtdNum );
+    if( NULL == (mtdFdPtr = fopen( mtdBuf, "r" )) )
     {
         LE_ERROR( "Unable to open %s: %m\n", mtdBuf );
         return LE_FAULT;
     }
     // Try to read the partition name
-    if( 1 != fscanf( mtdFd, "%s", mtdFetchName ))
+    if( 1 != fscanf( mtdFdPtr, "%s", mtdFetchName ))
     {
         LE_ERROR( "Unable to read mtd partition name %s: %m\n", mtdFetchName );
-        fclose( mtdFd );
+        fclose( mtdFdPtr );
         return LE_FAULT;
     }
-    fclose( mtdFd );
+    fclose( mtdFdPtr );
     // Look for the image type into the both system matrix
     mtdFetchName[strlen(mtdFetchName)] = '\0';
     for( partSystem = 0; partSystem < 2; partSystem++ )
@@ -449,8 +449,8 @@ static le_result_t GetImageTypeFromMtd
                 (0 == strcmp( mtdFetchName, pa_fwupdate_PartNamePtr[ partSystem ][ partIndex ])) )
             {
                 // Found: output partition name and return image type
-                *MtdNamePtr = pa_fwupdate_PartNamePtr[ partSystem ][ partIndex ];
-                *ImageTypePtr = partIndex;
+                *mtdNamePtr = pa_fwupdate_PartNamePtr[ partSystem ][ partIndex ];
+                *imageTypePtr = partIndex;
                 return LE_OK;
             }
 
@@ -531,16 +531,16 @@ static int GetMtdFromImageType
 (
     pa_fwupdate_ImageType_t partName,
     bool inDual,
-    char **MtdNamePtr,
-    pa_fwupdate_MtdInfo_t *mtdInfo
+    char** mtdNamePtr,
+    pa_fwupdate_MtdInfo_t* mtdInfoPtr
 )
 {
-    FILE *mtdFd;
+    FILE* mtdFdPtr;
     char mtdBuf[100], mtdFetchName[16];
     int mtdNum = -1, l, iniBootSystem, dualBootSystem;
-    char *mtdPartName;
+    char* mtdPartNamePtr;
 
-    *MtdNamePtr = NULL;
+    *mtdNamePtr = NULL;
     // Valid image type
     if( partName > CWE_IMAGE_TYPE_MAX )
         return -1;
@@ -548,24 +548,24 @@ static int GetMtdFromImageType
         return -1;
     dualBootSystem = (iniBootSystem ? 0 : 1);
 
-    mtdPartName = pa_fwupdate_PartNamePtr[ inDual ? dualBootSystem : iniBootSystem ][ partName ];
+    mtdPartNamePtr = pa_fwupdate_PartNamePtr[ inDual ? dualBootSystem : iniBootSystem ][ partName ];
     // If NULL, the partition (even if it exists) is not managed by fwupdate component
-    if( !mtdPartName )
+    if( !mtdPartNamePtr )
         return -1;
 
     // Build the partition name to fetch into the /proc/mtd
-    snprintf( mtdFetchName, sizeof(mtdFetchName), "\"%s\"", mtdPartName );
+    snprintf( mtdFetchName, sizeof(mtdFetchName), "\"%s\"", mtdPartNamePtr );
     l = strlen( mtdFetchName );
 
     // Open the /proc/mtd partition
-    if( NULL == (mtdFd = fopen( "/proc/mtd", "r" )) )
+    if( NULL == (mtdFdPtr = fopen( "/proc/mtd", "r" )) )
     {
         LE_ERROR( "fopen on /proc/mtd failed: %m" );
         return -1;
     }
 
     // Read all entries until the partition names match
-    while( fgets(mtdBuf, sizeof(mtdBuf), mtdFd ) ) {
+    while( fgets(mtdBuf, sizeof(mtdBuf), mtdFdPtr ) ) {
         // This is the fetched partition
         if( 0 == strncmp( mtdBuf + strlen( mtdBuf ) - l - 1, mtdFetchName, l ) )
         {
@@ -577,60 +577,60 @@ static int GetMtdFromImageType
             else
             {
                 // Output MTD partition name and MTD number
-                *MtdNamePtr = mtdPartName;
-                LE_DEBUG( "Partition %s is mtd%d\n", *MtdNamePtr, mtdNum );
+                *mtdNamePtr = mtdPartNamePtr;
+                LE_DEBUG( "Partition %s is mtd%d\n", *mtdNamePtr, mtdNum );
             }
             break;
         }
     }
-    fclose( mtdFd );
-    memset( mtdInfo, 0, sizeof(pa_fwupdate_MtdInfo_t) );
+    fclose( mtdFdPtr );
+    memset( mtdInfoPtr, 0, sizeof(pa_fwupdate_MtdInfo_t) );
     // If MTD number is valid, try to read the partition size
     if( -1 != mtdNum )
     {
         snprintf( mtdBuf, sizeof(mtdBuf), "/sys/class/mtd/mtd%d/size", mtdNum );
-        if( NULL == (mtdFd = fopen( mtdBuf, "r" )) )
+        if( NULL == (mtdFdPtr = fopen( mtdBuf, "r" )) )
         {
             LE_ERROR( "Unable to read page size for mtd %d: %m\n", mtdNum );
         }
-        fscanf( mtdFd, "%d", &(mtdInfo->size) );
-        fclose( mtdFd );
+        fscanf( mtdFdPtr, "%d", &(mtdInfoPtr->size) );
+        fclose( mtdFdPtr );
     }
     // If MTD number is valid, try to read the partition write size
     if( -1 != mtdNum )
     {
         snprintf( mtdBuf, sizeof(mtdBuf), "/sys/class/mtd/mtd%d/writesize", mtdNum );
-        if( NULL == (mtdFd = fopen( mtdBuf, "r" )) )
+        if( NULL == (mtdFdPtr = fopen( mtdBuf, "r" )) )
         {
             LE_ERROR( "Unable to read write size for mtd %d: %m\n", mtdNum );
         }
-        fscanf( mtdFd, "%d", &(mtdInfo->writeSize) );
-        fclose( mtdFd );
+        fscanf( mtdFdPtr, "%d", &(mtdInfoPtr->writeSize) );
+        fclose( mtdFdPtr );
     }
     // If MTD number is valid, try to read the partition erase size
     if( -1 != mtdNum )
     {
         snprintf( mtdBuf, sizeof(mtdBuf), "/sys/class/mtd/mtd%d/erasesize", mtdNum );
-        if( NULL == (mtdFd = fopen( mtdBuf, "r" )) )
+        if( NULL == (mtdFdPtr = fopen( mtdBuf, "r" )) )
         {
             LE_ERROR( "Unable to read erase size for mtd %d: %m\n", mtdNum );
         }
-        fscanf( mtdFd, "%d", &(mtdInfo->eraseSize) );
-        fclose( mtdFd );
+        fscanf( mtdFdPtr, "%d", &(mtdInfoPtr->eraseSize) );
+        fclose( mtdFdPtr );
     }
-    mtdInfo->nbBlk = mtdInfo->size / mtdInfo->eraseSize;
-    mtdInfo->startOffset = 0;
+    mtdInfoPtr->nbBlk = mtdInfoPtr->size / mtdInfoPtr->eraseSize;
+    mtdInfoPtr->startOffset = 0;
     // TZ and RPM are logical partitions
     if( (partName == CWE_IMAGE_TYPE_QRPM) ||
         (partName == CWE_IMAGE_TYPE_TZON) ) {
-        mtdInfo->logical = true;
-        mtdInfo->nbBlk /= 2;
-        mtdInfo->size /= 2;
-        mtdInfo->startOffset = (inDual ? dualBootSystem : iniBootSystem) ? mtdInfo->size : 0;
+        mtdInfoPtr->logical = true;
+        mtdInfoPtr->nbBlk /= 2;
+        mtdInfoPtr->size /= 2;
+        mtdInfoPtr->startOffset = (inDual ? dualBootSystem : iniBootSystem) ? mtdInfoPtr->size : 0;
     }
     LE_INFO( "mtd %d : \"%s\" size 0x%08x write %u erase %u nbblock %u logical %d start 0x%08x\n",
-             mtdNum, *MtdNamePtr, mtdInfo->size, mtdInfo->writeSize, mtdInfo->eraseSize,
-             mtdInfo->nbBlk, mtdInfo->logical, mtdInfo->startOffset );
+             mtdNum, *mtdNamePtr, mtdInfoPtr->size, mtdInfoPtr->writeSize, mtdInfoPtr->eraseSize,
+             mtdInfoPtr->nbBlk, mtdInfoPtr->logical, mtdInfoPtr->startOffset );
 
     // Return the MTD number
     return mtdNum;
@@ -648,10 +648,10 @@ static int GetMtdFromImageType
 static le_result_t WriteDataSBL
 (
     pa_fwupdate_ImageFormat_t format,   ///< [IN] Component image format linked to data
-    pa_fwupdate_CweHeader_t* hdr,       ///< [IN] Component image header
-    size_t *length,                     ///< [IN] Input data length
+    pa_fwupdate_CweHeader_t* hdrPtr,    ///< [IN] Component image header
+    size_t* lengthPtr,                  ///< [IN] Input data length
     size_t offset,                      ///< [IN] Data offset in the package
-    uint8_t* data                       ///< [IN] intput data
+    uint8_t* dataPtr                    ///< [IN] intput data
 )
 {
     int mtdNum;
@@ -659,24 +659,24 @@ static le_result_t WriteDataSBL
     le_result_t res = LE_OK;
     int sblNbBlk, sblMaxBlk;
 
-    mtdNum = GetMtdFromImageType( hdr->ImageType, 1, &MtdNamePtr, &mtdInfo );
+    mtdNum = GetMtdFromImageType( hdrPtr->ImageType, 1, &MtdNamePtr, &mtdInfo );
 
     LE_DEBUG ("Format %d image type %d len %d offset %d",
-              format, hdr->ImageType, *length, offset);
+              format, hdrPtr->ImageType, *lengthPtr, offset);
 
     if( -1 == mtdNum )
     {
-        LE_ERROR( "Unable to find a valid mtd for image type %d\n", hdr->ImageType );
+        LE_ERROR( "Unable to find a valid mtd for image type %d\n", hdrPtr->ImageType );
         return LE_FAULT;
     }
 
-    sblNbBlk = (hdr->ImageSize + mtdInfo.eraseSize - 1) / mtdInfo.eraseSize;
+    sblNbBlk = (hdrPtr->ImageSize + mtdInfo.eraseSize - 1) / mtdInfo.eraseSize;
     sblMaxBlk = mtdInfo.nbBlk - sblNbBlk;
 
     if (ImageSize == 0)
     {
         LE_INFO ("Writing \"%s\" (mtd%d) from CWE image %d, size %d\n",
-                 MtdNamePtr, mtdNum, hdr->ImageType, hdr->ImageSize );
+                 MtdNamePtr, mtdNum, hdrPtr->ImageType, hdrPtr->ImageSize );
 
         // Check that SBL is not greater than the max block for the partition.
         if (sblNbBlk > ((mtdInfo.nbBlk / 2) + 1))
@@ -687,21 +687,21 @@ static le_result_t WriteDataSBL
         }
 
         // Allocate a block to store the SBL temporary image
-        ImageSize = hdr->ImageSize;
+        ImageSize = hdrPtr->ImageSize;
         RawImagePtr = (uint8_t *) le_mem_ForceAlloc(SBLImgPool);
     }
 
     // Check that the chunck is inside the SBL temporary image
-    if ((offset + *length) > ImageSize)
+    if ((offset + *lengthPtr) > ImageSize)
     {
         LE_ERROR("SBL image size and offset/length mismatch: %u < %u+%u",
-                 ImageSize, offset, *length);
+                 ImageSize, offset, *lengthPtr);
         goto error;
     }
 
-    memcpy( RawImagePtr + offset, data, *length );
+    memcpy( RawImagePtr + offset, dataPtr, *lengthPtr );
 
-    if ((*length + offset) >= ImageSize )
+    if ((*lengthPtr + offset) >= ImageSize )
     {
         int rc;
         int sblBlk; // Base of SBL first block
@@ -863,17 +863,17 @@ error:
 //--------------------------------------------------------------------------------------------------
 static le_result_t WriteNvup
 (
-    pa_fwupdate_CweHeader_t* hdr,       ///< [IN] Component image header
-    size_t *length,                     ///< [IN] Input data length
+    pa_fwupdate_CweHeader_t* hdrPtr,    ///< [IN] Component image header
+    size_t* lengthPtr,                  ///< [IN] Input data length
     size_t offset,                      ///< [IN] Data offset in the package
-    uint8_t* data                       ///< [IN] intput data
+    uint8_t* dataPtr                    ///< [IN] intput data
 )
 {
     le_result_t result;
     bool isEnd;
 
     LE_INFO("Writing NVUP file ...");
-    LE_DEBUG("length=%d offset=%d", *length, offset);
+    LE_DEBUG("length=%d offset=%d", *lengthPtr, offset);
 
     if (IsFirstNvupDownloaded == false)
     {
@@ -889,14 +889,14 @@ static le_result_t WriteNvup
 
     if ((ImageSize == 0) && (offset == 0))
     {
-        ImageSize = hdr->ImageSize;
+        ImageSize = hdrPtr->ImageSize;
         LE_DEBUG("ImageSize=%d", ImageSize);
     }
 
-    isEnd = (*length + offset >= ImageSize) ? true : false;
+    isEnd = (*lengthPtr + offset >= ImageSize) ? true : false;
     LE_DEBUG("isEnd=%d", isEnd);
 
-    result = pa_fwupdate_NvupWrite(*length, data, isEnd);
+    result = pa_fwupdate_NvupWrite(*lengthPtr, dataPtr, isEnd);
 
     return result;
 }
@@ -913,10 +913,10 @@ static le_result_t WriteNvup
 static le_result_t WriteData
 (
     pa_fwupdate_ImageFormat_t format,   ///< [IN] Component image format linked to data
-    pa_fwupdate_CweHeader_t* hdr,       ///< [IN] Component image header
-    size_t *length,                     ///< [IN] Input data length
+    pa_fwupdate_CweHeader_t* hdrPtr,    ///< [IN] Component image header
+    size_t *lengthPtr,                  ///< [IN] Input data length
     size_t offset,                      ///< [IN] Data offset in the package
-    uint8_t* data                       ///< [IN] intput data
+    uint8_t* dataPtr                    ///< [IN] intput data
 )
 {
     int rc;
@@ -924,18 +924,18 @@ static le_result_t WriteData
     pa_fwupdate_MtdInfo_t mtdInfo;
 
     LE_DEBUG ("Format %d image type %d len %d offset %d",
-              format, hdr->ImageType, *length, offset);
+              format, hdrPtr->ImageType, *lengthPtr, offset);
 
     /* image type "FILE" must be considered as NVUP file */
-    if (hdr->ImageType == CWE_IMAGE_TYPE_FILE)
+    if (hdrPtr->ImageType == CWE_IMAGE_TYPE_FILE)
     {
-        return WriteNvup(hdr, length, offset, data);
+        return WriteNvup(hdrPtr, lengthPtr, offset, dataPtr);
     }
 
-    if (hdr->ImageType == CWE_IMAGE_TYPE_SBL1 )
+    if (hdrPtr->ImageType == CWE_IMAGE_TYPE_SBL1 )
     {
         // SBL is managed by a specific flash scheme
-        return WriteDataSBL( format, hdr, length, offset, data );
+        return WriteDataSBL( format, hdrPtr, lengthPtr, offset, dataPtr );
     }
 
     if ((0 == offset) && (NULL == FdNandWrite) && (0 == ImageSize) )
@@ -943,15 +943,15 @@ static le_result_t WriteData
         int mtdNum;
         char cmdBuf[CMD_BUFFER_LENGTH];
 
-        mtdNum = GetMtdFromImageType( hdr->ImageType, 1, &MtdNamePtr, &mtdInfo );
+        mtdNum = GetMtdFromImageType( hdrPtr->ImageType, 1, &MtdNamePtr, &mtdInfo );
 
         if( -1 == mtdNum )
         {
-            LE_ERROR( "Unable to find a valid mtd for image type %d\n", hdr->ImageType );
+            LE_ERROR( "Unable to find a valid mtd for image type %d\n", hdrPtr->ImageType );
             return LE_FAULT;
         }
         LE_INFO ("Writing \"%s\" (mtd%d) from CWE image %d\n",
-                 MtdNamePtr, mtdNum, hdr->ImageType );
+                 MtdNamePtr, mtdNum, hdrPtr->ImageType );
 
         /* erase the flash blocks related to the MTD mtdNum */
         snprintf(cmdBuf, sizeof(cmdBuf), FLASH_ERASE " /dev/mtd%d 0x%08x %u >/dev/null", mtdNum,
@@ -973,16 +973,16 @@ static le_result_t WriteData
             MtdNamePtr = NULL;
             return LE_FAULT;
         }
-        ImageSize = hdr->ImageSize;
+        ImageSize = hdrPtr->ImageSize;
     }
 
-    if (1 != fwrite( data, *length, 1, FdNandWrite) )
+    if (1 != fwrite( dataPtr, *lengthPtr, 1, FdNandWrite) )
     {
         LE_ERROR( "fwrite to nandwrite fails: %m\n" );
         goto error;
     }
 
-    if ((*length + offset) >= ImageSize )
+    if ((*lengthPtr + offset) >= ImageSize )
     {
         pclose( FdNandWrite );
         ImageSize = 0;
@@ -1033,20 +1033,20 @@ static void ParamsInit
 //--------------------------------------------------------------------------------------------------
 static uint32_t ImageValueGet
 (
-    pa_fwupdate_ImageType_t imagetype   ///< [IN] CWE Image Type to convert
+    pa_fwupdate_ImageType_t imageType   ///< [IN] CWE Image Type to convert
 )
 {
-    uint32_t imageval = CWE_IMAGE_TYPE_COUNT;
+    uint32_t imageVal = CWE_IMAGE_TYPE_COUNT;
 
-    if (imagetype < CWE_IMAGE_TYPE_COUNT)
+    if (imageType < CWE_IMAGE_TYPE_COUNT)
     {
-        imageval = (imagestring[imagetype][0] << 24) |
-                   (imagestring[imagetype][1] << 16) |
-                   (imagestring[imagetype][2] <<  8) |
-                    imagestring[imagetype][3];
+        imageVal = (ImageString[imageType][0] << 24) |
+                   (ImageString[imageType][1] << 16) |
+                   (ImageString[imageType][2] <<  8) |
+                    ImageString[imageType][3];
     }
 
-    return imageval;
+    return imageVal;
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -1063,27 +1063,27 @@ static uint32_t ImageValueGet
 //--------------------------------------------------------------------------------------------------
 static bool ImageTypeValidate
 (
-    uint32_t imagetype,                 ///< [IN] image type for validation
-    pa_fwupdate_ImageType_t* enumvalue   ///< [OUT] enum value for image type
+    uint32_t imageType,                     ///< [IN] image type for validation
+    pa_fwupdate_ImageType_t* enumValuePtr   ///< [OUT] enum value for image type
 )
 {
     bool retVal = true;
     pa_fwupdate_ImageType_t idx;
-    uint32_t imageval;
+    uint32_t imageVal;
 
-    LE_DEBUG ("imagetype 0x%x", imagetype);
+    LE_DEBUG ("imagetype 0x%x", imageType);
 
     for (idx = CWE_IMAGE_TYPE_MIN; idx < CWE_IMAGE_TYPE_COUNT; idx++)
     {
-        imageval = ImageValueGet(idx);
-        if (imageval == imagetype)
+        imageVal = ImageValueGet(idx);
+        if (imageVal == imageType)
         {
             break;
         }
     }
 
     /* save found index */
-    *enumvalue = idx;
+    *enumValuePtr = idx;
 
     if (idx == CWE_IMAGE_TYPE_COUNT)
     {
@@ -1091,7 +1091,7 @@ static bool ImageTypeValidate
         retVal = false;
     }
 
-    LE_DEBUG ("retVal %d --> image type %d", retVal, *enumvalue);
+    LE_DEBUG ("retVal %d --> image type %d", retVal, *enumValuePtr);
 
     return retVal;
 }
@@ -1110,23 +1110,23 @@ static bool ImageTypeValidate
 //--------------------------------------------------------------------------------------------------
 static uint32_t TranslateNetworkByteOrder
 (
-    uint8_t ** packetpp ///< [IN] memory location of the pointer to the packet from which the 32 bit
-                        ///< value will be read
+    uint8_t** packetPtrPtr ///< [IN] memory location of the pointer to the packet from which the 32 bit
+                           ///< value will be read
 )
 {
     uint32_t field;
-    uint8_t *packetp;
+    uint8_t* packetPtr;
 
-    packetp = *packetpp;
+    packetPtr = *packetPtrPtr;
 
-    field = *packetp++;
+    field = *packetPtr++;
     field <<= 8;
-    field += *packetp++;
+    field += *packetPtr++;
     field <<= 8;
-    field += *packetp++;
+    field += *packetPtr++;
     field <<= 8;
-    field += *packetp++;
-    *packetpp = packetp;
+    field += *packetPtr++;
+    *packetPtrPtr = packetPtr;
 
     return field;
 }
@@ -1139,23 +1139,23 @@ static uint32_t TranslateNetworkByteOrder
 //--------------------------------------------------------------------------------------------------
 static void TranslateNetworkByteOrderMulti
 (
-    uint8_t** packetpp, ///< [IN] memory location of a pointer to a packet from which the string of
-                        ///< 8-bit fields is to be read
-    uint8_t* bufferp,   ///< [OUT] pointer to a buffer into which the 8-bit fields are to be copied
-    uint16_t numfields  ///< [IN] number of 8-bit fields to be copied
+    uint8_t** packetPtrPtr, ///< [IN] memory location of a pointer to a packet from which the string of
+                            ///< 8-bit fields is to be read
+    uint8_t* bufferPtr,     ///< [OUT] pointer to a buffer into which the 8-bit fields are to be copied
+    uint16_t numfields      ///< [IN] number of 8-bit fields to be copied
 )
 {
-    uint8_t* packetp;
+    uint8_t* packetPtr;
     int32_t i;
 
-    packetp = *packetpp;
+    packetPtr = *packetPtrPtr;
 
     for (i = numfields - 1; i >= 0; i--)
     {
-        *bufferp++ = *packetp++;
+        *bufferPtr++ = *packetPtr++;
     }
 
-    *packetpp = packetp;
+    *packetPtrPtr = packetPtr;
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -1168,7 +1168,7 @@ static void TranslateNetworkByteOrderMulti
 //--------------------------------------------------------------------------------------------------
 static uint32_t Crc32
 (
-    uint8_t* address,   ///< [IN] Input buffer
+    uint8_t* addressPtr,///< [IN] Input buffer
     uint32_t size,      ///< [IN] Number of bytes to read
     uint32_t crc        ///< [IN] Starting CRC seed
 )
@@ -1176,7 +1176,7 @@ static uint32_t Crc32
     for (; size > 0 ; size--)
     {
         //-- byte loop */
-        crc = (((crc >> 8) & 0x00FFFFFF) ^ Crc32Table[(crc ^ *address++) & 0x000000FF]);
+        crc = (((crc >> 8) & 0x00FFFFFF) ^ Crc32Table[(crc ^ *addressPtr++) & 0x000000FF]);
     }
     return crc;
 }
@@ -1214,6 +1214,7 @@ static ssize_t LengthToRead
             readCount = CurrentCweHeader.ImageSize - CurrentImageOffset;
         }
     }
+    LE_DEBUG("readCount=%d", readCount);
     return readCount;
 }
 
@@ -1230,102 +1231,102 @@ static ssize_t LengthToRead
 //--------------------------------------------------------------------------------------------------
 static le_result_t HeaderLoad
 (
-    uint8_t* startp,                ///< [IN] start address of the CWE header to be read
-    pa_fwupdate_CweHeader_t* hdp    ///< [OUT] pointer to a CWE header structure
+    uint8_t* startPtr,              ///< [IN] start address of the CWE header to be read
+    pa_fwupdate_CweHeader_t* hdpPtr ///< [OUT] pointer to a CWE header structure
 )
 {
     le_result_t result = LE_NOT_POSSIBLE;
 
-    if ((startp == NULL) || (hdp == NULL))
+    if ((startPtr == NULL) || (hdpPtr == NULL))
     {
         result = LE_BAD_PARAMETER;
     }
     else
     {
-        uint8_t* bufp;
+        uint8_t* bufPtr;
         pa_fwupdate_ImageType_t imagetype;
 
         /* init the buf pointer */
-        bufp = startp;
+        bufPtr = startPtr;
 
         /* read in the required number of bytes from product specific buffer */
-        TranslateNetworkByteOrderMulti (&bufp, ( uint8_t*) hdp->PSB, sizeof(hdp->PSB));
+        TranslateNetworkByteOrderMulti (&bufPtr, ( uint8_t*) hdpPtr->PSB, sizeof(hdpPtr->PSB));
 
         /* Get the Header Version: Set our pointer to the header revision number first */
-        bufp = startp + HDR_REV_NUM_OFST;
+        bufPtr = startPtr + HDR_REV_NUM_OFST;
 
         /* Read the header version number */
-        hdp->HdrRevNum = TranslateNetworkByteOrder(&bufp);
-        LE_DEBUG ("hdp->HdrRevNum %d", hdp->HdrRevNum);
+        hdpPtr->HdrRevNum = TranslateNetworkByteOrder(&bufPtr);
+        LE_DEBUG ("hdpPtr->HdrRevNum %d", hdpPtr->HdrRevNum);
 
         /* Continue reading the buffer from the Image Type Offset field */
-        bufp = startp + IMAGE_TYPE_OFST;
+        bufPtr = startPtr + IMAGE_TYPE_OFST;
 
         /* get the image type */
-        hdp->ImageType = TranslateNetworkByteOrder(&bufp);
-        LE_DEBUG ("ImageType 0x%x", hdp->ImageType);
+        hdpPtr->ImageType = TranslateNetworkByteOrder(&bufPtr);
+        LE_DEBUG ("ImageType 0x%x", hdpPtr->ImageType);
 
-        if (hdp->HdrRevNum >= HDRCURVER)
+        if (hdpPtr->HdrRevNum >= HDRCURVER)
         {
             /* validate image type */
-            if (ImageTypeValidate(hdp->ImageType, &imagetype))
+            if (ImageTypeValidate(hdpPtr->ImageType, &imagetype))
             {
-                hdp->ImageType = imagetype;
-                LE_DEBUG ("ImageType %d", hdp->ImageType);
+                hdpPtr->ImageType = imagetype;
+                LE_DEBUG ("ImageType %d", hdpPtr->ImageType);
                 /* get product type */
-                hdp->ProdType = TranslateNetworkByteOrder(&bufp);
-                LE_DEBUG ("ProdType 0x%x", hdp->ProdType);
+                hdpPtr->ProdType = TranslateNetworkByteOrder(&bufPtr);
+                LE_DEBUG ("ProdType 0x%x", hdpPtr->ProdType);
 
                 /* get application image size */
-                hdp->ImageSize = TranslateNetworkByteOrder(&bufp);
-                LE_DEBUG ("ImageSize %d 0x%x", hdp->ImageSize, hdp->ImageSize);
+                hdpPtr->ImageSize = TranslateNetworkByteOrder(&bufPtr);
+                LE_DEBUG ("ImageSize %d 0x%x", hdpPtr->ImageSize, hdpPtr->ImageSize);
 
                 /* get CRC32 of application */
-                hdp->CRC32 = TranslateNetworkByteOrder(&bufp);
-                LE_DEBUG ("CRC32 0x%x", hdp->CRC32);
+                hdpPtr->CRC32 = TranslateNetworkByteOrder(&bufPtr);
+                LE_DEBUG ("CRC32 0x%x", hdpPtr->CRC32);
 
                 /* get version string */
-                TranslateNetworkByteOrderMulti(&bufp, hdp->Version, HVERSTRSIZE);
-                LE_DEBUG ("Version %s", hdp->Version);
+                TranslateNetworkByteOrderMulti(&bufPtr, hdpPtr->Version, HVERSTRSIZE);
+                LE_DEBUG ("Version %s", hdpPtr->Version);
                 /* get date string */
-                TranslateNetworkByteOrderMulti(&bufp, hdp->RelDate, HDATESIZE);
+                TranslateNetworkByteOrderMulti(&bufPtr, hdpPtr->RelDate, HDATESIZE);
 
                 /* get backwards compatibilty field */
-                hdp->Compat = TranslateNetworkByteOrder(&bufp);
+                hdpPtr->Compat = TranslateNetworkByteOrder(&bufPtr);
 
                 /* get the misc options */
-                hdp->MiscOpts = *bufp;
-                LE_DEBUG ("HeaderLoad: hdp->MiscOpts %d", hdp->MiscOpts);
+                hdpPtr->MiscOpts = *bufPtr;
+                LE_DEBUG ("HeaderLoad: hdpPtr->MiscOpts %d", hdpPtr->MiscOpts);
 
                 /* get the load address and entry point based upon the header version. */
-                bufp=startp+STOR_ADDR_OFST;
-                hdp->StorAddr  = (uint32_t)(*bufp++);
-                hdp->StorAddr |= (uint32_t)(*bufp++ << 8);
-                hdp->StorAddr |= (uint32_t)(*bufp++ << 16);
-                hdp->StorAddr |= (uint32_t)(*bufp++ << 24);
+                bufPtr=startPtr+STOR_ADDR_OFST;
+                hdpPtr->StorAddr  = (uint32_t)(*bufPtr++);
+                hdpPtr->StorAddr |= (uint32_t)(*bufPtr++ << 8);
+                hdpPtr->StorAddr |= (uint32_t)(*bufPtr++ << 16);
+                hdpPtr->StorAddr |= (uint32_t)(*bufPtr++ << 24);
 
-                bufp=startp+PROG_ADDR_OFST;
-                hdp->ProgAddr  = (uint32_t)(*bufp++);
-                hdp->ProgAddr |= (uint32_t)(*bufp++ << 8);
-                hdp->ProgAddr |= (uint32_t)(*bufp++ << 16);
-                hdp->ProgAddr |= (uint32_t)(*bufp++ << 24);
+                bufPtr=startPtr+PROG_ADDR_OFST;
+                hdpPtr->ProgAddr  = (uint32_t)(*bufPtr++);
+                hdpPtr->ProgAddr |= (uint32_t)(*bufPtr++ << 8);
+                hdpPtr->ProgAddr |= (uint32_t)(*bufPtr++ << 16);
+                hdpPtr->ProgAddr |= (uint32_t)(*bufPtr++ << 24);
 
-                bufp=startp+ENTRY_OFST;
-                hdp->Entry     = (uint32_t)(*bufp++);
-                hdp->Entry    |= (uint32_t)(*bufp++ << 8);
-                hdp->Entry    |= (uint32_t)(*bufp++ << 16);
-                hdp->Entry    |= (uint32_t)(*bufp++ << 24);
+                bufPtr=startPtr+ENTRY_OFST;
+                hdpPtr->Entry     = (uint32_t)(*bufPtr++);
+                hdpPtr->Entry    |= (uint32_t)(*bufPtr++ << 8);
+                hdpPtr->Entry    |= (uint32_t)(*bufPtr++ << 16);
+                hdpPtr->Entry    |= (uint32_t)(*bufPtr++ << 24);
 
                 /* get signature */
-                hdp->Signature = TranslateNetworkByteOrder(&bufp);
+                hdpPtr->Signature = TranslateNetworkByteOrder(&bufPtr);
 
                 /* get product specific buffer CRC value */
-                bufp = startp + CRC_PROD_BUF_OFST;
-                hdp->CRCProdBuf = TranslateNetworkByteOrder(&bufp);
+                bufPtr = startPtr + CRC_PROD_BUF_OFST;
+                hdpPtr->CRCProdBuf = TranslateNetworkByteOrder(&bufPtr);
 
                 /* get CRC valid indicator value */
-                bufp = startp + CRC_INDICATOR_OFST;
-                hdp->CRCIndicator = TranslateNetworkByteOrder(&bufp);
+                bufPtr = startPtr + CRC_INDICATOR_OFST;
+                hdpPtr->CRCIndicator = TranslateNetworkByteOrder(&bufPtr);
 
                 /* Only check the signature field for application imagetypes (not for
                  * bootloader) since we always want to return false for bootloader
@@ -1333,7 +1334,7 @@ static le_result_t HeaderLoad
                 if (imagetype == CWE_IMAGE_TYPE_APPL)
                 {
                     /* check application signature */
-                    if (hdp->Signature != APPSIGN)
+                    if (hdpPtr->Signature != APPSIGN)
                     {
                         /* application not found */
                         result = LE_FAULT;
@@ -1356,7 +1357,7 @@ static le_result_t HeaderLoad
         }
         else
         {
-            LE_ERROR ("bad header version %d", hdp->HdrRevNum);
+            LE_ERROR ("bad header version %d", hdpPtr->HdrRevNum);
             result = LE_FAULT;
         }
 
@@ -1368,7 +1369,7 @@ static le_result_t HeaderLoad
             /* The image type was already checked in le_fwupdate_HeaderLoad */
 
             /* Validate product ID */
-            if (hdp->ProdType != PA_FWUPDATE_PRODUCT_ID)
+            if (hdpPtr->ProdType != PA_FWUPDATE_PRODUCT_ID)
             {
                 LE_ERROR ("Bad Product Id in the header");
                 result = LE_FAULT;
@@ -1377,14 +1378,14 @@ static le_result_t HeaderLoad
             /* Check that the image is not a compressed one:
              * not supported on this platform
              */
-            if ((hdp->MiscOpts & MISC_OPTS_COMPRESS) == MISC_OPTS_COMPRESS)
+            if ((hdpPtr->MiscOpts & MISC_OPTS_COMPRESS) == MISC_OPTS_COMPRESS)
             {
                 LE_ERROR( "Compressed image is not supported");
                 result = LE_FAULT;
             }
 
             /* validate PSB CRC */
-            if (Crc32(startp, CRC_PROD_BUF_OFST, START_CRC32) != hdp->CRCProdBuf)
+            if (Crc32(startPtr, CRC_PROD_BUF_OFST, START_CRC32) != hdpPtr->CRCProdBuf)
             {
                 LE_ERROR( "error PSB CRC32");
                 result = LE_FAULT;
@@ -1415,21 +1416,21 @@ static le_result_t HeaderLoad
 //--------------------------------------------------------------------------------------------------
 static le_result_t DataParseAndStore
 (
-    size_t offset,  ///< [IN] Data offset in the package
-    size_t length,  ///< [IN] Input data lentg
-    uint8_t* chunk  ///< [IN] intput data
+    size_t offset,     ///< [IN] Data offset in the package
+    size_t length,     ///< [IN] Input data lentg
+    uint8_t* chunkPtr  ///< [IN] intput data
 )
 {
     le_result_t result = LE_OK;
     LE_DEBUG ("start");
-    if ((chunk == NULL) || (length > CHUNK_LENGTH))
+    if ((chunkPtr == NULL) || (length > CHUNK_LENGTH))
     {
         result = LE_BAD_PARAMETER;
     }
     else
     {
         size_t Return = 0;
-        LE_DEBUG ("parsing a chunk: len %zd, IsImageToBeRead %d",
+        LE_DEBUG ("parsing a chunkPtr: len %zd, IsImageToBeRead %d",
                     length, IsImageToBeRead);
 
         /* Check if a header is read or a component image */
@@ -1438,7 +1439,7 @@ static le_result_t DataParseAndStore
             /* For a header, the full header shall be provided */
             if (length == HEADER_SIZE)
             {
-                result = HeaderLoad (chunk, &CurrentCweHeader);
+                result = HeaderLoad (chunkPtr, &CurrentCweHeader);
                 if (result != LE_OK)
                 {
                     LE_ERROR ("Error in parsing the CWE header");
@@ -1470,7 +1471,7 @@ static le_result_t DataParseAndStore
         {
             /* Component image is under read: follow it */
             Return = pa_fwupdate_ImageData (&CurrentCweHeader,
-                                            chunk,
+                                            chunkPtr,
                                             length);
             if (!Return)
             {
@@ -1527,7 +1528,8 @@ le_result_t pa_fwupdate_DualSysSync
     int mtdSrc, mtdDst;
     int idx, rc;
     pa_fwupdate_MtdInfo_t mtdInfoSrc, mtdInfoDst;
-    char *mtdSrcName, *mtdDstName;
+    char* mtdSrcNamePtr;
+    char* mtdDstNamePtr;
     char cmdBuf[1024];
 
     if( -1 == (iniBootSystem = GetInitialBootSystem()) )
@@ -1545,13 +1547,13 @@ le_result_t pa_fwupdate_DualSysSync
 
     LE_INFO( "Synchronizing from system %d to system %d\n", iniBootSystem + 1, dualBootSystem + 1);
     for( idx = 0; idx < sizeof( syncPartition )/sizeof(pa_fwupdate_ImageType_t); idx++ ) {
-        if( -1 == (mtdSrc = GetMtdFromImageType( syncPartition[idx], false, &mtdSrcName,
+        if( -1 == (mtdSrc = GetMtdFromImageType( syncPartition[idx], false, &mtdSrcNamePtr,
                                                  &mtdInfoSrc )) )
         {
             LE_ERROR( "Unable to determine initial partition for %d\n", syncPartition[idx] );
             return LE_FAULT;
         }
-        if( -1 == (mtdDst = GetMtdFromImageType( syncPartition[idx], true, &mtdDstName,
+        if( -1 == (mtdDst = GetMtdFromImageType( syncPartition[idx], true, &mtdDstNamePtr,
                                                  &mtdInfoDst )) )
         {
             LE_ERROR( "Unable to determine dual partition for %d\n", syncPartition[idx] );
@@ -1593,10 +1595,10 @@ le_result_t pa_fwupdate_DualSysSync
         }
         LE_INFO( "Synchronizing %s partition \"%s%s\" (mtd%d) from \"%s%s\" (mtd%d)\n",
                  mtdDst == mtdSrc ? "logical" : "physical",
-                 mtdDstName,
+                 mtdDstNamePtr,
                  mtdDst == mtdSrc && dualBootSystem ? "2" : "",
                  mtdDst,
-                 mtdSrcName,
+                 mtdSrcNamePtr,
                  mtdDst == mtdSrc && iniBootSystem ? "2" : "",
                  mtdSrc );
         rc = system( cmdBuf );
@@ -1644,28 +1646,28 @@ void pa_fwupdate_Reset
 //--------------------------------------------------------------------------------------------------
 size_t pa_fwupdate_ImageData
 (
-    pa_fwupdate_CweHeader_t *CweHeader, ///< [IN] CWE header linked to image data
-    uint8_t* chunk,                     ///< [IN]Data to be written in flash partition
-    size_t length                       ///< [IN]Data length to be written in flash partition
+    pa_fwupdate_CweHeader_t* cweHeaderPtr, ///< [IN] CWE header linked to image data
+    uint8_t* chunkPtr,                     ///< [IN]Data to be written in flash partition
+    size_t length                          ///< [IN]Data length to be written in flash partition
 )
 {
     size_t result = 0;
 
     /* Check incoming parameters */
-    if (CweHeader == NULL)
+    if (cweHeaderPtr == NULL)
     {
         LE_ERROR ("bad parameters");
         return 0;
     }
 
     LE_DEBUG ("imagetype %d, CurrentImageOffset %d length %d, CurrentImageSize %d",
-                CweHeader->ImageType,
+                cweHeaderPtr->ImageType,
                 (uint32_t)CurrentImageOffset,
                 (uint32_t)length,
-                (uint32_t)CweHeader->ImageSize);
+                (uint32_t)cweHeaderPtr->ImageSize);
 
     /* Check incoming parameters */
-    if ((chunk == NULL) || (length > CHUNK_LENGTH))
+    if ((chunkPtr == NULL) || (length > CHUNK_LENGTH))
     {
         LE_ERROR ("bad parameters");
         result = 0;
@@ -1678,14 +1680,14 @@ size_t pa_fwupdate_ImageData
         }
 
         if (LE_OK == WriteData (CurrentImageFormat,
-                                CweHeader,
+                                cweHeaderPtr,
                                 &length,
                                 CurrentImageOffset,
-                                chunk))
+                                chunkPtr))
         {
-            CurrentImageCrc32 = Crc32( chunk, (uint32_t)length, CurrentImageCrc32 );
+            CurrentImageCrc32 = Crc32( chunkPtr, (uint32_t)length, CurrentImageCrc32 );
             LE_DEBUG ( "image data write: CRC in header: 0x%x, calculated CRC 0x%x",
-                        CweHeader->CRC32, CurrentImageCrc32 );
+                        cweHeaderPtr->CRC32, CurrentImageCrc32 );
             CurrentImageOffset += length;
             result = length;
 
@@ -1705,12 +1707,12 @@ size_t pa_fwupdate_ImageData
             LE_ERROR ("error when writing data in partition");
         }
 
-        if (CurrentImageOffset == CweHeader->ImageSize)
+        if (CurrentImageOffset == cweHeaderPtr->ImageSize)
         {
             LE_DEBUG ( "image data write end: CRC in header: 0x%x, calculated CRC 0x%x",
-                            CweHeader->CRC32, CurrentImageCrc32 );
+                            cweHeaderPtr->CRC32, CurrentImageCrc32 );
             /* The whole image was written: compare CRC */
-            if (CweHeader->CRC32 != CurrentImageCrc32)
+            if (cweHeaderPtr->CRC32 != CurrentImageCrc32)
             {
                 /* Error on CRC check */
                 LE_ERROR ("Error on CRC check");
@@ -1720,10 +1722,10 @@ size_t pa_fwupdate_ImageData
             {
                 CurrentImageOffset = 0;
                 LE_DEBUG ("CurrentImageOffset %d, CurrentImage %d",
-                            (uint32_t)CurrentImageOffset, CweHeader->ImageType);
+                            (uint32_t)CurrentImageOffset, cweHeaderPtr->ImageType);
             }
             IsImageToBeRead = false;
-            if (CweHeader->ImageType == CWE_IMAGE_TYPE_MODM)
+            if (cweHeaderPtr->ImageType == CWE_IMAGE_TYPE_MODM)
             {
                 IsModemDownloaded = true;
             }
@@ -1755,8 +1757,8 @@ le_result_t pa_fwupdate_Download
 {
     le_result_t result = LE_FAULT;
     size_t totalCount = 0;
-    ssize_t readCount = 0;
-    ssize_t DataLenToBeRead = 0;
+    ssize_t readCount;
+    ssize_t DataLenToBeRead;
     uint8_t* bufferPtr = le_mem_ForceAlloc (ChunkPool);
 
     LE_DEBUG ("fd %d", fd);
@@ -1849,6 +1851,11 @@ le_result_t pa_fwupdate_Download
                         else if (!readCount)
                         {
                             LE_DEBUG ("Read %zd bytes in total", totalCount);
+                            if (totalCount == 0)
+                            {
+                                LE_ERROR("No data to read !!!");
+                                goto error;
+                            }
                             if (IsModemDownloaded != IsFirstNvupDownloaded)
                             {
                                 /* a modem as been downloaded but no nvup files
@@ -1900,6 +1907,7 @@ le_result_t pa_fwupdate_Download
     LE_DEBUG ("result %d", result);
     return result;
 error:
+    le_mem_Release(bufferPtr);
     if (IsFirstNvupDownloaded)
     {
         /* almost one NVUP file has been downloaded => delete it */
@@ -1907,6 +1915,7 @@ error:
     }
     /* Done with the file, so close it. */
     close (fd);
+    IsOngoing = false;
     return LE_FAULT;
 }
 
@@ -1921,16 +1930,16 @@ error:
 //--------------------------------------------------------------------------------------------------
 le_result_t pa_fwupdate_GetInitialSubSystemId
 (
-    uint8_t *initialSSId ///< [OUT] if LE_OK, the current boot system
+    uint8_t* initialSsidPtr ///< [OUT] if LE_OK, the current boot system
 )
 {
-    if (initialSSId == NULL)
+    if (initialSsidPtr == NULL)
     {
         LE_ERROR("initialSSId null pointer");
         return LE_FAULT;
     }
 
-    *initialSSId = GetInitialBootSystem() + 1; /* add 1 since GetInitialBootSystem returns 0 or 1 */
+    *initialSsidPtr = GetInitialBootSystem() + 1; /* add 1 since GetInitialBootSystem returns 0 or 1 */
 
     return LE_OK;
 }
