@@ -16,11 +16,15 @@
 #include "interfaces.h"
 #include <sys/reboot.h>
 #include <linux/reboot.h>
+#include <mtd/mtd-user.h>
+#include <signal.h>
 
 
 // Tools from mtd-utils package
-#define FLASH_ERASE        "/usr/sbin/flash_erase"
-#define NANDWRITE          "/usr/sbin/nandwrite"
+#define FLASH_ERASE        "/usr/sbin/flash_erase -q"
+// For nandwrite, mark bad blocks option (-m) is forced
+#define NANDWRITE          "/usr/sbin/nandwrite -m -q"
+
 
 // SBL number of passes needed to flash low/high and high/low SBL scrub
 #define SBL_MAX_PASS              2
@@ -229,7 +233,7 @@ static const char ImageString [CWE_IMAGE_TYPE_COUNT][sizeof(uint32_t)] =
  * Memory Pool for SBL temporary image
  */
 //--------------------------------------------------------------------------------------------------
-static le_mem_PoolRef_t   SBLImgPool;
+static le_mem_PoolRef_t   FlashImgPool;
 
 //--------------------------------------------------------------------------------------------------
 /**
@@ -238,8 +242,8 @@ static le_mem_PoolRef_t   SBLImgPool;
 //--------------------------------------------------------------------------------------------------
 typedef struct pa_fwupdate_MtdInfo {
     uint32_t size;        ///< Total size of the partition, in bytes.
-    uint32_t writeSize;   ///< Minimal writable flash unit size.
-    uint32_t eraseSize;   ///< "Major" erase size for the device.
+    uint32_t writeSize;   ///< Minimal writable flash unit size i.e. min I/O size.
+    uint32_t eraseSize;   ///< Erase block size for the device.
     uint32_t startOffset; ///< In case of logical partition, the offset in the physical partition
     uint32_t nbBlk;       ///< number of blocks
     bool     logical;     ///< flag for logical partitions
@@ -365,6 +369,14 @@ static char* pa_fwupdate_PartNamePtr[2][ CWE_IMAGE_TYPE_COUNT ] = {
 //                                       Private Functions
 //==================================================================================================
 //--------------------------------------------------------------------------------------------------
+
+static void HandleSigPipe(int sig)
+{
+    // Just print a warning about SIGPIPE for investigation purpose
+    // The write to popen(3) fails, and this occurs when BAD blocks
+    // are found on the destination MTD.
+    LE_WARN("Handling SIGPIPE");
+}
 
 //--------------------------------------------------------------------------------------------------
 /**
@@ -658,11 +670,12 @@ static le_result_t WriteDataSBL
     pa_fwupdate_MtdInfo_t mtdInfo;
     le_result_t res = LE_OK;
     int sblNbBlk, sblMaxBlk;
+    int mtdFd = -1;
 
     mtdNum = GetMtdFromImageType( hdrPtr->ImageType, 1, &MtdNamePtr, &mtdInfo );
 
-    LE_DEBUG ("Format %d image type %d len %d offset %d",
-              format, hdrPtr->ImageType, *lengthPtr, offset);
+    LE_DEBUG("Format %d image type %d len %d offset %d",
+             format, hdrPtr->ImageType, *lengthPtr, offset);
 
     if( -1 == mtdNum )
     {
@@ -679,7 +692,7 @@ static le_result_t WriteDataSBL
                  MtdNamePtr, mtdNum, hdrPtr->ImageType, hdrPtr->ImageSize );
 
         // Check that SBL is not greater than the max block for the partition.
-        if (sblNbBlk > ((mtdInfo.nbBlk / 2) + 1))
+        if (sblNbBlk > (mtdInfo.nbBlk / 2))
         {
             LE_ERROR("SBL is too big: %d (nbBlock %d)",
                      ImageSize, (ImageSize / mtdInfo.eraseSize));
@@ -688,7 +701,7 @@ static le_result_t WriteDataSBL
 
         // Allocate a block to store the SBL temporary image
         ImageSize = hdrPtr->ImageSize;
-        RawImagePtr = (uint8_t *) le_mem_ForceAlloc(SBLImgPool);
+        RawImagePtr = (uint8_t *) le_mem_ForceAlloc(FlashImgPool);
     }
 
     // Check that the chunck is inside the SBL temporary image
@@ -705,15 +718,16 @@ static le_result_t WriteDataSBL
     {
         int rc;
         int sblBlk; // Base of SBL first block
-        int nbBlk;
+        int nbBadBlk; // Number of BAD blocks inside the half partition
+        int sblBaseBlk; // Base block where the SBL will be flashed
         int atBlk = -1;
+        int atMaxBlk = -1;
         int atOffset = -1;
         int pass = 0;
         char cmdBuf[CMD_BUFFER_LENGTH];
-        FILE *mtdFd;
 
         snprintf( cmdBuf, sizeof(cmdBuf), "/dev/mtd%d", mtdNum );
-        if (NULL == (mtdFd = fopen( cmdBuf, "r" )))
+        if (-1 == (mtdFd = open( cmdBuf, O_RDONLY )))
         {
             LE_ERROR("Open of MTD %s fails: %m\n", cmdBuf );
             goto error;
@@ -723,16 +737,14 @@ static le_result_t WriteDataSBL
         {
             unsigned char sbl[sizeof(pa_fwupdate_SBLPreamble)];
 
-            if (fseek( mtdFd, sblBlk * mtdInfo.eraseSize, SEEK_SET ))
+            if (-1 == lseek( mtdFd, (off_t)sblBlk * mtdInfo.eraseSize, SEEK_SET ))
             {
-                LE_ERROR("fseek() at offset %d fails: %m", sblBlk * mtdInfo.eraseSize );
-                fclose( mtdFd );
+                LE_ERROR("lseek() at offset %d fails: %m", sblBlk * mtdInfo.eraseSize );
                 goto error;
             }
-            if (fread( sbl, sizeof(sbl), 1, mtdFd ) != 1)
+            if (sizeof(sbl) != read( mtdFd, sbl, sizeof(sbl) ))
             {
                 LE_ERROR("Read of SBL at sector %d fails: %m", sblBlk );
-                fclose( mtdFd );
                 goto error;
             }
             if (0 == memcmp( sbl, pa_fwupdate_SBLPreamble, sizeof(sbl) ))
@@ -741,7 +753,6 @@ static le_result_t WriteDataSBL
                 break;
             }
         }
-        fclose( mtdFd );
 
         if (sblBlk > sblMaxBlk)
         {
@@ -763,64 +774,111 @@ static le_result_t WriteDataSBL
 
         do
         {
-            // Erase all blocks related to the SBL starting first block
-            atOffset = (!pass ?
-                        (sblBlk ? 0 : sblMaxBlk) : sblBlk) * mtdInfo.eraseSize;
-            snprintf(cmdBuf, sizeof(cmdBuf), FLASH_ERASE " /dev/mtd%d 0x%08x %u >/dev/null",
-                     mtdNum, atOffset, sblNbBlk);
-            LE_INFO("(%d)cmd: %s\n", pass, cmdBuf);
+            // If SBL base is high, erase and flash the low before, and recopy to high
+            // If SBL base is low, erase and flash the high before, and recopy to low
+            // First block used as base to flash the SBL
+            atBlk = (!pass ? (sblBlk ? 0 : mtdInfo.nbBlk / 2) : (sblBlk ? mtdInfo.nbBlk / 2 : 0));
+            atOffset = atBlk * mtdInfo.eraseSize;
+
+            // Erase the half of the partition to be sure that in case of bad blocks, the
+            // SBL will be safely written
+            snprintf(cmdBuf, sizeof(cmdBuf), FLASH_ERASE " /dev/mtd%d 0x%08x %u",
+                     mtdNum, atOffset, mtdInfo.nbBlk / 2);
+            LE_DEBUG("(%d)cmd: %s\n", pass, cmdBuf);
             rc = system(cmdBuf);
             if (WEXITSTATUS(rc))
             {
                 LE_ERROR ("(%d)Flash erase failed: %d\n", pass, WEXITSTATUS(rc));
-                goto error;
+                goto critical;
             }
 
-            // Flash by block loop from last SBL block to first SBL block
-            // If SBL base is high, flash the low before, and recopy to high
-            // If SBL base is low, flash the high before, and recopy to low
-            for( atBlk = (!pass ?
-                          (sblBlk ? 0 : sblMaxBlk) : sblBlk) + sblNbBlk - 1,
-                 nbBlk = 0;
-                 nbBlk < sblNbBlk;
-                 nbBlk++, atBlk-- )
+            // Last block of the SBL half partition
+            atMaxBlk = atBlk + (mtdInfo.nbBlk / 2);
+            nbBadBlk = 0;
+            // Check and count bad blocks in half partition to ensure that there is enough
+            // good blocks to flash the SBL
+            for (sblBaseBlk = -1; atBlk < atMaxBlk; atBlk++)
             {
-                atOffset = atBlk * mtdInfo.eraseSize;
-                LE_DEBUG("(%d)sblBlk = %d, atBlk = %d, atOffset = 0x%08x\n",
-                        pass, sblBlk, atBlk, atOffset);
+                 loff_t blkOff = atBlk * mtdInfo.eraseSize;
 
-                // Flash blocks related to the SBL starting last block
-                snprintf(cmdBuf, sizeof(cmdBuf), NANDWRITE " -s %u -p /dev/mtd%d - >/dev/null",
-                         atOffset, mtdNum);
-                LE_INFO("(%d)Popen to %s\n", pass, cmdBuf);
-                LE_DEBUG("(%d)fwrite( offset=%x, length=%d )\n", pass,
-                        ((sblNbBlk - nbBlk - 1) * mtdInfo.eraseSize),
-                        nbBlk ? mtdInfo.eraseSize :
-                                (ImageSize - ((sblNbBlk - nbBlk - 1) * mtdInfo.eraseSize)));
-                FdNandWrite = popen( cmdBuf, "we" );
-                if (NULL == FdNandWrite)
-                {
-                    LE_ERROR ("(%d)popen to nandwrite failed : %m\n", pass);
-                    goto error;
-                }
-                if (1 != fwrite( RawImagePtr + ((sblNbBlk - nbBlk - 1) * mtdInfo.eraseSize),
-                                 mtdInfo.eraseSize, 1, FdNandWrite) )
-                {
-                    LE_ERROR("(%d)fwrite to nandwrite fails: %m\n", pass);
-                    goto error;
-                }
-                pclose( FdNandWrite );
-                FdNandWrite = NULL;
+                 if (-1 == (rc = ioctl(mtdFd, MEMGETBADBLOCK, &blkOff)))
+                 {
+                     LE_ERROR("ioctl(MEMGETBADBLOCK) fails for block %d, offset %lld: %m",
+                              atBlk, blkOff);
+                     goto error;
+                 }
+                 if (rc)
+                 {
+                    LE_WARN("Skipping bad block at %d", atBlk);
+                    nbBadBlk++;
+                 }
+                 else if (-1 == sblBaseBlk)
+                 {
+                     // Block is marked good. Use this block at base for SBL
+                     sblBaseBlk = atBlk;
+                 }
             }
+
+            // Not enougth block to flash the SBL
+            if ((sblBaseBlk == -1) ||
+                (sblBaseBlk > (atMaxBlk - sblNbBlk)) ||
+                (nbBadBlk > ((mtdInfo.nbBlk / 2) - sblNbBlk)))
+            {
+                LE_CRIT("(%d)Not enough blocks to update the SBL: Aborting", pass);
+                LE_CRIT("(%d)Half nb blk %d, nb bad %d, SBL base %d, SBL nb blk %d",
+                        pass, (mtdInfo.nbBlk / 2), nbBadBlk, sblBaseBlk, sblNbBlk);
+                goto critical;
+            }
+
+            // Skip the first page to invalidate the SBL signature
+            atOffset = (sblBaseBlk * mtdInfo.eraseSize) + mtdInfo.writeSize;
+
+            snprintf(cmdBuf, sizeof(cmdBuf), NANDWRITE " -s 0x%x -p /dev/mtd%d -",
+                         atOffset, mtdNum);
+            LE_DEBUG("(%d)Popen to %s\n", pass, cmdBuf);
+            FdNandWrite = popen( cmdBuf, "we" );
+            if (NULL == FdNandWrite)
+            {
+                LE_ERROR ("(%d)popen to nandwrite failed : %m\n", pass);
+                goto critical;
+            }
+            if (1 != fwrite((RawImagePtr + mtdInfo.writeSize),
+                            (ImageSize - mtdInfo.writeSize), 1, FdNandWrite) )
+            {
+                LE_ERROR("(%d)fwrite to nandwrite fails: %m\n", pass);
+                goto critical;
+            }
+            pclose( FdNandWrite );
+            FdNandWrite = NULL;
+
+            atOffset = sblBaseBlk * mtdInfo.eraseSize;
+
+            snprintf(cmdBuf, sizeof(cmdBuf), NANDWRITE " -s 0x%x -p /dev/mtd%d -",
+                         atOffset, mtdNum);
+            LE_DEBUG("(%d)Popen to %s\n", pass, cmdBuf);
+            FdNandWrite = popen( cmdBuf, "we" );
+            if (NULL == FdNandWrite)
+            {
+                LE_ERROR ("(%d)popen to nandwrite failed : %m\n", pass);
+                goto critical;
+            }
+            if (1 != fwrite(RawImagePtr, mtdInfo.writeSize, 1, FdNandWrite) )
+            {
+                LE_ERROR("(%d)fwrite to nandwrite fails: %m\n", pass);
+                goto critical;
+            }
+            pclose( FdNandWrite );
+            FdNandWrite = NULL;
+
             // Do low and high or high and low: 2 passes
         } while (++pass < SBL_MAX_PASS);
 
-        atOffset = (sblBlk ? 0 : sblMaxBlk) * mtdInfo.eraseSize;
+        atOffset = (sblBlk ? 0 : mtdInfo.nbBlk / 2) * mtdInfo.eraseSize;
 
         // Erase blocks related to the temporary SBL: high if SBL low; low if SBL is high
-        snprintf(cmdBuf, sizeof(cmdBuf), FLASH_ERASE " /dev/mtd%d 0x%08x %u >/dev/null",
-                 mtdNum, atOffset, sblNbBlk);
-        LE_INFO( "(E)cmd: %s\n", cmdBuf);
+        snprintf(cmdBuf, sizeof(cmdBuf), FLASH_ERASE " /dev/mtd%d 0x%08x %u",
+                 mtdNum, atOffset, mtdInfo.nbBlk / 2);
+        LE_DEBUG("(E)cmd: %s\n", cmdBuf);
         rc = system(cmdBuf);
         if (WEXITSTATUS(rc))
         {
@@ -828,6 +886,7 @@ static le_result_t WriteDataSBL
              goto error;
         }
 
+        close(mtdFd);
         le_mem_Release(RawImagePtr);
         RawImagePtr = NULL;
         ImageSize = 0;
@@ -838,8 +897,16 @@ static le_result_t WriteDataSBL
     }
 
     return res;
+
+critical:
+    // The SBL may be partially updated or corrupted
+    LE_CRIT("SBL is not updated correctly");
 error:
-    if( RawImagePtr )
+    if (mtdFd != - 1)
+    {
+        close(mtdFd);
+    }
+    if (RawImagePtr)
     {
         le_mem_Release(RawImagePtr);
     }
@@ -956,7 +1023,7 @@ static le_result_t WriteData
         /* erase the flash blocks related to the MTD mtdNum */
         snprintf(cmdBuf, sizeof(cmdBuf), FLASH_ERASE " /dev/mtd%d 0x%08x %u >/dev/null", mtdNum,
                  mtdInfo.startOffset, mtdInfo.nbBlk);
-        LE_INFO( "cmd: %s\n", cmdBuf);
+        LE_DEBUG( "cmd: %s\n", cmdBuf);
         rc = system(cmdBuf);
         if (WEXITSTATUS(rc))
         {
@@ -1527,10 +1594,13 @@ le_result_t pa_fwupdate_DualSysSync
     int iniBootSystem, dualBootSystem;
     int mtdSrc, mtdDst;
     int idx, rc;
+    int flashFd = -1;
     pa_fwupdate_MtdInfo_t mtdInfoSrc, mtdInfoDst;
     char* mtdSrcNamePtr;
     char* mtdDstNamePtr;
-    char cmdBuf[1024];
+    char mtdName[CMD_BUFFER_LENGTH];
+    char cmdBuf[CMD_BUFFER_LENGTH];
+    uint8_t* flashBlockPtr = NULL;
 
     if( -1 == (iniBootSystem = GetInitialBootSystem()) )
     {
@@ -1545,6 +1615,8 @@ le_result_t pa_fwupdate_DualSysSync
         return LE_FAULT;
     }
 
+    flashBlockPtr = (uint8_t *) le_mem_ForceAlloc(FlashImgPool);
+
     LE_INFO( "Synchronizing from system %d to system %d\n", iniBootSystem + 1, dualBootSystem + 1);
     for( idx = 0; idx < sizeof( syncPartition )/sizeof(pa_fwupdate_ImageType_t); idx++ ) {
         if( -1 == (mtdSrc = GetMtdFromImageType( syncPartition[idx], false, &mtdSrcNamePtr,
@@ -1557,13 +1629,13 @@ le_result_t pa_fwupdate_DualSysSync
                                                  &mtdInfoDst )) )
         {
             LE_ERROR( "Unable to determine dual partition for %d\n", syncPartition[idx] );
-            return LE_FAULT;
+            goto error;
         }
         if( mtdInfoSrc.writeSize != mtdInfoDst.writeSize )
         {
             LE_ERROR( "Can not copy flash with different page size: source = %d, destination = %d\n",
                       mtdInfoSrc.writeSize, mtdInfoDst.writeSize );
-            return LE_FAULT;
+            goto error;
         }
         if( (mtdSrc == mtdDst) &&
             ((syncPartition[idx] == CWE_IMAGE_TYPE_QRPM) ||
@@ -1576,22 +1648,19 @@ le_result_t pa_fwupdate_DualSysSync
                      mtdDst, mtdInfoDst.size, mtdInfoDst.eraseSize, mtdInfoDst.nbBlk,
                      mtdInfoDst.startOffset );
             snprintf( cmdBuf, sizeof(cmdBuf),
-                      FLASH_ERASE " /dev/mtd%d 0x%08x %u >/dev/null && "
-                      "(/bin/dd if=/dev/mtd%d bs=%u count=%u skip=%u | "
-                      NANDWRITE " -s %u /dev/mtd%d >/dev/null)",
+                      FLASH_ERASE " /dev/mtd%d 0x%08x %u && "
+                      NANDWRITE " -s %u /dev/mtd%d -",
                       mtdDst, mtdInfoDst.startOffset, mtdInfoDst.nbBlk,
-                      mtdSrc, mtdInfoSrc.eraseSize, mtdInfoSrc.nbBlk,
-                      mtdInfoSrc.startOffset / mtdInfoSrc.eraseSize,
                       mtdInfoDst.startOffset, mtdDst );
-            LE_ERROR( "Logical %s update: \n%s\n", dualBootSystem ? "2" : "1", cmdBuf );
+            LE_INFO( "Logical %s update: \n%s\n", dualBootSystem ? "2" : "1", cmdBuf );
         }
         else
         {
             /* erase the destination mtd and copy source mtd to destination one */
             snprintf( cmdBuf, sizeof(cmdBuf),
-                      FLASH_ERASE " /dev/mtd%d 0 0 >/dev/null && "
-                      NANDWRITE " /dev/mtd%d </dev/mtd%d >/dev/null",
-                      mtdDst, mtdDst, mtdSrc );
+                      FLASH_ERASE " /dev/mtd%d 0 0 && "
+                      NANDWRITE " /dev/mtd%d -",
+                      mtdDst, mtdDst );
         }
         LE_INFO( "Synchronizing %s partition \"%s%s\" (mtd%d) from \"%s%s\" (mtd%d)\n",
                  mtdDst == mtdSrc ? "logical" : "physical",
@@ -1601,13 +1670,80 @@ le_result_t pa_fwupdate_DualSysSync
                  mtdSrcNamePtr,
                  mtdDst == mtdSrc && iniBootSystem ? "2" : "",
                  mtdSrc );
-        rc = system( cmdBuf );
-        if (WEXITSTATUS(rc))
+        LE_DEBUG( "Popen to %s", cmdBuf );
+        FdNandWrite = popen( cmdBuf, "we" );
+        if (NULL == FdNandWrite)
         {
-            LE_ERROR ("Synchronization failed failed: %d\n", WEXITSTATUS(rc));
-            return LE_FAULT;
+            LE_ERROR ("popen to nandwrite failed : %m\n");
+            goto error;
         }
+
+        snprintf( mtdName, sizeof(mtdName), "/dev/mtd%d", mtdSrc );
+        LE_INFO("Opening source MTD %s\n", mtdName);
+        flashFd = open( mtdName, O_RDONLY );
+        if (flashFd < 0)
+        {
+            LE_ERROR("open on source MTD fails: %m");
+            goto error;
+        }
+
+        int nbBlk;
+        loff_t blkOff;
+        bool isSigPipe = false;
+
+        for (nbBlk = 0; !isSigPipe && (nbBlk < mtdInfoSrc.nbBlk); nbBlk++)
+        {
+            blkOff = (loff_t)mtdInfoSrc.startOffset + ((loff_t)nbBlk * mtdInfoSrc.eraseSize);
+            if (-1 == (rc = ioctl(flashFd, MEMGETBADBLOCK, &blkOff)))
+            {
+                LE_ERROR("ioctl(MEMGETBADBLOCK) fails for block %d, offset %lld: %m", nbBlk, blkOff);
+                goto error;
+            }
+            if (rc)
+            {
+               LE_WARN("Skipping bad block at %d", nbBlk);
+            }
+            else
+            {
+                do
+                {
+                    // Until read(2) succeed, set the position to the block to read
+                    rc = lseek(flashFd, (off_t)blkOff, SEEK_SET);
+                    if ((-1 == rc))
+                    {
+                        LE_ERROR("lseek fails for block %d: %m", nbBlk);
+                        goto error;
+                    }
+                    rc = read(flashFd, flashBlockPtr, mtdInfoSrc.eraseSize);
+                    if ((-1 == rc) && (EINTR != errno))
+                    {
+                        LE_ERROR("read fails for block %d: %m", nbBlk);
+                        goto error;
+                    }
+                } while (rc != mtdInfoSrc.eraseSize);
+
+                if (1 != fwrite(flashBlockPtr, mtdInfoSrc.eraseSize, 1, FdNandWrite) )
+                {
+                    if (errno == EPIPE)
+                    {
+                        LE_WARN("Bad block on destination MTD ? Missing %d blocks: %m\n",
+                                mtdInfoSrc.nbBlk - nbBlk);
+                        isSigPipe = true;
+                    }
+                    else
+                    {
+                        LE_ERROR("fwrite to nandwrite fails: %m\n");
+                        goto error;
+                    }
+                }
+            }
+        }
+        close(flashFd);
+        pclose( FdNandWrite );
+        FdNandWrite = NULL;
     }
+
+    le_mem_Release(flashBlockPtr);
 
     LE_INFO ("pa_fwupdate_DualSysSync done");
     if (LE_OK != pa_fwupdate_SetSyncState())
@@ -1616,6 +1752,22 @@ le_result_t pa_fwupdate_DualSysSync
         return LE_FAULT;
     }
     return LE_OK;
+
+error:
+    if (flashBlockPtr)
+    {
+        le_mem_Release(flashBlockPtr);
+    }
+    if (FdNandWrite)
+    {
+        pclose( FdNandWrite );
+        FdNandWrite = NULL;
+    }
+    if (flashFd != -1)
+    {
+        close(flashFd);
+    }
+    return LE_FAULT;
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -1897,6 +2049,7 @@ le_result_t pa_fwupdate_Download
                 /* Both systems are not synchronized
                  * It's not possible to launch a new package download
                  */
+                close(fd);
                 result = LE_NOT_POSSIBLE;
             }
         }
@@ -1964,8 +2117,32 @@ COMPONENT_INIT
     LE_FATAL_IF(-1 == mtdNum, "Unable to find a valid mtd for SBL image\n");
 
     /* Allocate a pool for the SBL image */
-    SBLImgPool = le_mem_CreatePool("SBLImgagePool",
+    FlashImgPool = le_mem_CreatePool("FlashImagePool",
                                    (mtdInfo.nbBlk / 2) * mtdInfo.eraseSize);
-    le_mem_ExpandPool(SBLImgPool, 1);
+    le_mem_ExpandPool(FlashImgPool, 1);
+
+    /* Install a SIGPIPE handler for popen(3) to nandwrite
+       When signal is caught, it is ignored, but EPIPE is returned from fwrite(3) */
+    sigset_t sigSet;
+    struct sigaction sigAct;
+    int rc;
+
+    memset( &sigSet, sizeof(sigSet), 0 );
+    sigaddset( &sigSet, SIGPIPE );
+    // Unblock the signal SIGPIPE to be sure it will be received by our thread
+    if ((rc = pthread_sigmask( SIG_UNBLOCK, &sigSet, NULL )))
+    {
+        errno = rc;
+        LE_CRIT( "Unable to set signals mask for SIGPIPE : %m\n" );
+    }
+
+    memset( &sigAct, sizeof(sigAct), 0 );
+    sigAct.sa_handler = HandleSigPipe;
+    sigAct.sa_flags = 0; // Be sure that the handler remains installed when SIGPIPE is caught
+    if (sigaction( SIGPIPE, &sigAct, NULL ))
+    {
+        LE_CRIT( "Unable to install signal handler for SIGPIPE : %m\n" );
+    }
+
 }
 
