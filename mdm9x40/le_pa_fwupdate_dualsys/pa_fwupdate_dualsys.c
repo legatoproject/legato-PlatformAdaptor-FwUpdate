@@ -16,6 +16,7 @@
 #include "interfaces.h"
 #include <sys/reboot.h>
 #include <linux/reboot.h>
+#include <sys/select.h>
 #include <mtd/mtd-user.h>
 #include <signal.h>
 
@@ -32,6 +33,13 @@
 // Command buffer length used for popen(3) and system(3)
 #define CMD_BUFFER_LENGTH       256
 
+// Timeout for select(): Set to 30s to give time for connection through socket
+#define SET_SELECT_TIMEOUT( tv ) \
+        do { \
+            (tv)->tv_sec = 30; \
+            (tv)->tv_usec = 0; \
+        } while (0)
+
 //==================================================================================================
 //                                       Static variables
 //==================================================================================================
@@ -41,6 +49,13 @@
  */
 //--------------------------------------------------------------------------------------------------
 static le_mem_PoolRef_t   ChunkPool;
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Read offset of the fulle CWE image Length
+ */
+//--------------------------------------------------------------------------------------------------
+static size_t FullImageLength = -1;
 
 //--------------------------------------------------------------------------------------------------
 /**
@@ -1515,6 +1530,15 @@ static le_result_t DataParseAndStore
                 else
                 {
                     LE_DEBUG ("CWE header read ok");
+                    if (-1 == FullImageLength)
+                    {
+                        /*
+                         * Full length of the CWE image is provided inside the
+                         * first CWE header
+                         */
+                        FullImageLength = CurrentCweHeader.ImageSize + HEADER_SIZE;
+                        LE_DEBUG("New CWE: FullImageLength = %u", FullImageLength);
+                    }
                     /* Check the value of the CurrentCweHeader.ImageType which is proceed
                      * If the image type is a composite one, the next data is a CWE header
                      */
@@ -1899,6 +1923,7 @@ size_t pa_fwupdate_ImageData
  *      - LE_BAD_PARAMETER The parameter is invalid (needs to be positive)
  *      - LE_TERMINATED    The download was aborted by the user (by calling
  *                          pa_fwupdate_ExecuteCommand( pa_fwupdate_CANCEL )
+ *      - LE_TIMEOUT       The download fails after 30 seconds without data recieved
  *      - LE_FAULT         The function failed
  */
 //--------------------------------------------------------------------------------------------------
@@ -1912,6 +1937,8 @@ le_result_t pa_fwupdate_Download
     ssize_t readCount;
     ssize_t DataLenToBeRead;
     uint8_t* bufferPtr = le_mem_ForceAlloc (ChunkPool);
+
+    FullImageLength = -1;
 
     LE_DEBUG ("fd %d", fd);
     if (fd < 0)
@@ -1938,6 +1965,9 @@ le_result_t pa_fwupdate_Download
             /* check if both systems are synchronized */
             if (bSync == true)
             {
+                fd_set fdSetRead;
+                struct timeval timeRead;
+
                 /* Both sytems are synchronized */
                 ParamsInit();
                 /* Indicate that a download is launched */
@@ -1957,31 +1987,84 @@ le_result_t pa_fwupdate_Download
                     else
                     {
                         ssize_t LenRead = 0;
+                        int rc;
 
                         /* Read a block at a time from the fd, and send to the modem */
                         /* Get the length which can be read */
                         DataLenToBeRead = LengthToRead();
-                        readCount = read (fd, bufferPtr, DataLenToBeRead);
 
-                        if ((LenRead == -1) && (errno != EINTR))
+                        do
                         {
-                            LE_FATAL("error during read: errno=%d", errno);
-                        }
+                            FD_ZERO(&fdSetRead);
+                            FD_SET(fd, &fdSetRead);
+                            SET_SELECT_TIMEOUT( &timeRead );
+                            if (0 == (rc = select( fd + 1, &fdSetRead, NULL, NULL, &timeRead)))
+                            {
+                                LE_CRIT("Timeout on reception. Aborting");
+                                goto timeout;
+                            }
+                            else if ((1 == rc) && FD_ISSET(fd, &fdSetRead))
+                            {
+                                readCount = read (fd, bufferPtr, DataLenToBeRead);
+                                if ((readCount == -1) && (errno == EAGAIN))
+                                {
+                                    readCount = 0;
+                                }
+                                else if ((readCount == -1) && (errno != EINTR))
+                                {
+                                    LE_ERROR("error during read: %m");
+                                    goto error;
+                                }
 
-                        LE_DEBUG ("Read %d", (uint32_t)readCount);
+                                LE_DEBUG ("Read %d", (uint32_t)readCount);
+                            }
+                            else
+                            {
+                                LE_CRIT("select() fails or fd is not set: %d, %m\n", rc);
+                                goto error;
+                            }
+                        }
+                        while ((readCount == -1) && (errno == EINTR));
 
                         if (readCount > 0)
                         {
                             /* In case partial data were read */
                             while( readCount != DataLenToBeRead )
                             {
-                                LenRead = read (fd, bufferPtr + LenRead, DataLenToBeRead - LenRead);
-                                if ((LenRead == -1) && (errno != EINTR))
+                                FD_ZERO(&fdSetRead);
+                                FD_SET(fd, &fdSetRead);
+                                SET_SELECT_TIMEOUT( &timeRead );
+                                if (0 == (rc = select( fd + 1, &fdSetRead, NULL, NULL, &timeRead)))
                                 {
-                                    LE_FATAL("error during read: errno=%d",
-                                             errno);
+                                    LE_CRIT("Timeout on reception. Aborting");
+                                    goto timeout;
                                 }
-                                readCount += LenRead;
+                                else if ((1 == rc) && FD_ISSET(fd, &fdSetRead))
+                                {
+                                    LenRead = read (fd, bufferPtr + LenRead,
+                                                    DataLenToBeRead - LenRead);
+                                    // If read(2) returns 0 as length read, this is an error because
+                                    // a length > 0 is expected here
+                                    if (!LenRead)
+                                    {
+                                        LE_CRIT("Nothing to read! CWE file is corrupted ?");
+                                        goto error;
+                                    }
+                                    else if ((LenRead == -1) && (errno != EINTR))
+                                    {
+                                        LE_ERROR("error during read: %m");
+                                        goto error;
+                                    }
+                                    else if (LenRead > 0)
+                                    {
+                                        readCount += LenRead;
+                                    }
+                                }
+                                else
+                                {
+                                    LE_CRIT("select() fails or fd is not set: %d, %m\n", rc);
+                                    goto error;
+                                }
                             }
 
                             /* Parse the read data and store in partition */
@@ -1994,13 +2077,25 @@ le_result_t pa_fwupdate_Download
                                 totalCount += readCount;
                                 LE_DEBUG ("--> update totalCount %d",
                                           (uint32_t)totalCount);
+                                if(totalCount >= FullImageLength)
+                                {
+                                    LE_INFO("End of update: total read %zd, full length expected %zd",
+                                             totalCount, FullImageLength);
+                                    readCount = 0;
+                                }
                             }
                             else
                             {
                                 goto error;
                             }
                         }
-                        else if (!readCount)
+                        else if (readCount < 0)
+                        {
+                            LE_ERROR ("Error while reading fd=%i : %m", fd);
+                            goto error;
+                        }
+
+                        if (!readCount)
                         {
                             LE_DEBUG ("Read %zd bytes in total", totalCount);
                             if (totalCount == 0)
@@ -2035,11 +2130,6 @@ le_result_t pa_fwupdate_Download
                             close(fd);
                             break;
                         }
-                        else
-                        {
-                            LE_ERROR ("Error while reading fd=%i : %m", fd);
-                            goto error;
-                        }
                     }
                 }
                 IsOngoing = false;
@@ -2049,7 +2139,6 @@ le_result_t pa_fwupdate_Download
                 /* Both systems are not synchronized
                  * It's not possible to launch a new package download
                  */
-                close(fd);
                 result = LE_NOT_POSSIBLE;
             }
         }
@@ -2057,8 +2146,12 @@ le_result_t pa_fwupdate_Download
 
     le_mem_Release(bufferPtr);
 
+    FullImageLength = -1;
     LE_DEBUG ("result %d", result);
     return result;
+
+timeout:
+    result = LE_TIMEOUT;
 error:
     le_mem_Release(bufferPtr);
     if (IsFirstNvupDownloaded)
@@ -2068,8 +2161,9 @@ error:
     }
     /* Done with the file, so close it. */
     close (fd);
+    FullImageLength = -1;
     IsOngoing = false;
-    return LE_FAULT;
+    return LE_TIMEOUT == result ? LE_TIMEOUT : LE_FAULT;
 }
 
 //--------------------------------------------------------------------------------------------------
