@@ -26,6 +26,10 @@
 // For nandwrite, mark bad blocks option (-m) is forced
 #define NANDWRITE          "/usr/sbin/nandwrite -m -q"
 
+// MTD device node name
+#define MTD_NAME           "/dev/mtd"
+// MTD name length = MTD device node name + 3 for minor + 1 for '\0'
+#define MTD_NAME_LENGTH    (sizeof(MTD_NAME) + 4)
 
 // SBL number of passes needed to flash low/high and high/low SBL scrub
 #define SBL_MAX_PASS              2
@@ -249,7 +253,14 @@ static const char ImageString [CWE_IMAGE_TYPE_COUNT][sizeof(uint32_t)] =
 
 //--------------------------------------------------------------------------------------------------
 /**
- * Memory Pool for SBL temporary image
+ * Memory Pool for SBL temporary image pointers to SBL blocks
+ */
+//--------------------------------------------------------------------------------------------------
+static le_mem_PoolRef_t   SblBlockPool;
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Memory Pool for SBL temporary image blocks
  */
 //--------------------------------------------------------------------------------------------------
 static le_mem_PoolRef_t   FlashImgPool;
@@ -294,7 +305,7 @@ static char* MtdNamePtr = NULL;
  * Pointer to the RAW image space used for SBL scrub
  */
 //--------------------------------------------------------------------------------------------------
-static uint8_t* RawImagePtr = NULL;
+static uint8_t** RawImagePtr = NULL;
 
 //--------------------------------------------------------------------------------------------------
 /**
@@ -395,6 +406,29 @@ static void HandleSigPipe(int sig)
     // The write to popen(3) fails, and this occurs when BAD blocks
     // are found on the destination MTD.
     LE_WARN("Handling SIGPIPE");
+}
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * This function is used to calculate a CRC-32
+ *
+ * @return
+ *      - 32-bit CRC
+ */
+//--------------------------------------------------------------------------------------------------
+static uint32_t Crc32
+(
+    uint8_t* addressPtr,///< [IN] Input buffer
+    uint32_t size,      ///< [IN] Number of bytes to read
+    uint32_t crc        ///< [IN] Starting CRC seed
+)
+{
+    for (; size > 0 ; size--)
+    {
+        //-- byte loop */
+        crc = (((crc >> 8) & 0x00FFFFFF) ^ Crc32Table[(crc ^ *addressPtr++) & 0x000000FF]);
+    }
+    return crc;
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -669,6 +703,135 @@ static int GetMtdFromImageType
 
 //--------------------------------------------------------------------------------------------------
 /**
+ * Read a block of data at a given offset from flash device
+ *
+ * @return
+ *      - LE_OK on success
+ *      - LE_FAULT on failure
+ */
+//--------------------------------------------------------------------------------------------------
+static le_result_t ReadDataAt
+(
+    int flashFd,       ///< [IN] File descriptor to the flash device
+    off_t blkOff,      ///< [IN] Block offset where to read
+    uint8_t *blkPtr,   ///< [IN] Buffer to store read data
+    size_t blkSize     ///< [IN] Size to be read
+)
+{
+    int rc;
+
+    do
+    {
+        // Until read(2) succeed, set the position to the block to read
+        rc = lseek(flashFd, (off_t)blkOff, SEEK_SET);
+        if ((-1 == rc))
+        {
+            LE_ERROR("lseek fails at offset %lx: %m", blkOff);
+            return LE_FAULT;
+        }
+        rc = read(flashFd, blkPtr, blkSize);
+        if ((-1 == rc) && (EINTR != errno))
+        {
+            LE_ERROR("read fails at offset %lx: %m", blkOff);
+            return LE_FAULT;
+        }
+    }
+    while (rc != blkSize);
+
+    return LE_OK;
+}
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Check if data flashed into a partition are correctly written
+ *
+ * @return
+ *      - LE_OK on success
+ *      - LE_FAULT on failure
+ */
+//--------------------------------------------------------------------------------------------------
+static le_result_t CheckData
+(
+    int mtdNum,                        ///< [IN] Minor of the MTD device to check
+    pa_fwupdate_MtdInfo_t* mtdInfoPtr, ///< [IN] Pointer to MTD informations
+    size_t sizeToCheck,                ///< [IN] Size to be used to compute the CRC
+    off_t atOffset,                    ///< [IN] Force offset to start from
+    uint32_t crc32ToCheck              ///< [IN] Expected CRC 32
+)
+{
+    int mtdFd = -1;
+    uint8_t* checkBlockPtr = NULL;
+
+    char mtd[MTD_NAME_LENGTH];
+    size_t size, imageSize = 0;
+    off_t offset = atOffset;
+    uint32_t crc32 = START_CRC32;
+    int rc;
+
+    LE_DEBUG( "Size=%08x, Crc32=%08x", sizeToCheck, crc32ToCheck);
+
+    checkBlockPtr = (uint8_t *) le_mem_ForceAlloc(FlashImgPool);
+
+    snprintf( mtd, sizeof(mtd), MTD_NAME "%d", mtdNum );
+    if (-1 == (mtdFd = open( mtd, O_RDONLY )))
+    {
+        LE_ERROR("Open of MTD %s fails: %m\n", mtd );
+        goto error;
+    }
+
+    while ((imageSize < sizeToCheck) && (offset < mtdInfoPtr->size))
+    {
+        loff_t blkOff = (loff_t)offset + (loff_t)mtdInfoPtr->startOffset;
+
+        LE_DEBUG("Check if bad block at %llx", blkOff);
+        if (-1 == (rc = ioctl(mtdFd, MEMGETBADBLOCK, &blkOff)))
+        {
+            LE_ERROR("ioctl(MEMGETBADBLOCK) fails for block %lld, offset %llx: %m",
+                     blkOff / mtdInfoPtr->eraseSize, blkOff);
+            goto error;
+        }
+        if (rc)
+        {
+            LE_WARN("Skipping bad block %lld", blkOff / mtdInfoPtr->eraseSize);
+            offset += mtdInfoPtr->eraseSize;
+            continue;
+        }
+
+        size = (((imageSize + mtdInfoPtr->eraseSize) < sizeToCheck)
+                   ? mtdInfoPtr->eraseSize
+                   : sizeToCheck - imageSize);
+        LE_DEBUG("Read %x at offset %lx, block offset %llx", size, offset, blkOff);
+        if (LE_OK != ReadDataAt( mtdFd, (off_t)blkOff, checkBlockPtr, size))
+        {
+            LE_ERROR("read fails for offset %llx: %m", blkOff);
+            goto error;
+        }
+
+        crc32 = Crc32( checkBlockPtr, (uint32_t)size, crc32);
+        offset += size;
+        imageSize += size;
+    }
+    if (crc32 != crc32ToCheck)
+    {
+        LE_CRIT( "Bad CRC32 calculated on mtd%d: read %08x != expected %08x",
+                 mtdNum, crc32, crc32ToCheck );
+        goto error;
+    }
+
+    LE_INFO("CRC32 OK for mtd%d\n", mtdNum );
+
+    close( mtdFd );
+    le_mem_Release(checkBlockPtr);
+    return LE_OK;
+
+error:
+    close( mtdFd );
+    le_mem_Release(checkBlockPtr);
+    return LE_FAULT;
+}
+
+//--------------------------------------------------------------------------------------------------
+/**
  * Write data into SBL (SBL scrub)
  *
  * @return
@@ -688,8 +851,11 @@ static le_result_t WriteDataSBL
     int mtdNum;
     pa_fwupdate_MtdInfo_t mtdInfo;
     le_result_t res = LE_OK;
-    int sblNbBlk, sblMaxBlk;
+    int sblNbBlk, sblMaxBlk, sblIdxBlk;
     int mtdFd = -1;
+    size_t lengthToCopy;
+    size_t lengthCopied;
+    off_t offsetToCopy;
 
     mtdNum = GetMtdFromImageType( hdrPtr->ImageType, 1, &MtdNamePtr, &mtdInfo );
 
@@ -705,22 +871,23 @@ static le_result_t WriteDataSBL
     sblNbBlk = (hdrPtr->ImageSize + mtdInfo.eraseSize - 1) / mtdInfo.eraseSize;
     sblMaxBlk = mtdInfo.nbBlk - sblNbBlk;
 
+    // Check that SBL is not greater than the max block for the partition.
+    if (sblNbBlk > (mtdInfo.nbBlk / 2))
+    {
+        LE_ERROR("SBL is too big: %d (nbBlock %d)",
+                 ImageSize, (ImageSize / mtdInfo.eraseSize));
+        goto error;
+    }
+
     if (ImageSize == 0)
     {
         LE_INFO ("Writing \"%s\" (mtd%d) from CWE image %d, size %d\n",
                  MtdNamePtr, mtdNum, hdrPtr->ImageType, hdrPtr->ImageSize );
 
-        // Check that SBL is not greater than the max block for the partition.
-        if (sblNbBlk > (mtdInfo.nbBlk / 2))
-        {
-            LE_ERROR("SBL is too big: %d (nbBlock %d)",
-                     ImageSize, (ImageSize / mtdInfo.eraseSize));
-            goto error;
-        }
-
         // Allocate a block to store the SBL temporary image
         ImageSize = hdrPtr->ImageSize;
-        RawImagePtr = (uint8_t *) le_mem_ForceAlloc(FlashImgPool);
+        RawImagePtr = (uint8_t **) le_mem_ForceAlloc(SblBlockPool);
+        memset(RawImagePtr, 0, sizeof(uint8_t*) * (mtdInfo.size / 2));
     }
 
     // Check that the chunck is inside the SBL temporary image
@@ -731,7 +898,34 @@ static le_result_t WriteDataSBL
         goto error;
     }
 
-    memcpy( RawImagePtr + offset, dataPtr, *lengthPtr );
+    lengthToCopy = *lengthPtr;
+    lengthCopied = 0;
+    offsetToCopy = offset;
+
+    do
+    {
+        // Compute on what block the offsetToCopy belongs
+        sblIdxBlk = (offsetToCopy / mtdInfo.eraseSize);
+        offsetToCopy = (offsetToCopy & (mtdInfo.eraseSize - 1));
+        if (RawImagePtr[sblIdxBlk] == NULL)
+        {
+            RawImagePtr[sblIdxBlk] = (uint8_t *) le_mem_ForceAlloc(FlashImgPool);
+        }
+
+        if ((lengthToCopy + offsetToCopy - 1) > mtdInfo.eraseSize)
+        {
+            lengthToCopy = mtdInfo.eraseSize - offsetToCopy;
+        }
+
+        memcpy( RawImagePtr[sblIdxBlk] + offsetToCopy,
+                dataPtr,
+                lengthToCopy );
+        dataPtr += lengthToCopy;
+        lengthCopied += lengthToCopy;
+        offsetToCopy += ((sblIdxBlk * mtdInfo.eraseSize) + lengthCopied);
+        lengthToCopy = (*lengthPtr - lengthCopied);
+    }
+    while( lengthToCopy );
 
     if ((*lengthPtr + offset) >= ImageSize )
     {
@@ -745,7 +939,7 @@ static le_result_t WriteDataSBL
         int pass = 0;
         char cmdBuf[CMD_BUFFER_LENGTH];
 
-        snprintf( cmdBuf, sizeof(cmdBuf), "/dev/mtd%d", mtdNum );
+        snprintf( cmdBuf, sizeof(cmdBuf), MTD_NAME "%d", mtdNum );
         if (-1 == (mtdFd = open( cmdBuf, O_RDONLY )))
         {
             LE_ERROR("Open of MTD %s fails: %m\n", cmdBuf );
@@ -756,12 +950,10 @@ static le_result_t WriteDataSBL
         {
             unsigned char sbl[sizeof(pa_fwupdate_SBLPreamble)];
 
-            if (-1 == lseek( mtdFd, (off_t)sblBlk * mtdInfo.eraseSize, SEEK_SET ))
-            {
-                LE_ERROR("lseek() at offset %d fails: %m", sblBlk * mtdInfo.eraseSize );
-                goto error;
-            }
-            if (sizeof(sbl) != read( mtdFd, sbl, sizeof(sbl) ))
+            if (LE_OK != ReadDataAt( mtdFd,
+                                     (off_t)sblBlk * mtdInfo.eraseSize,
+                                     sbl,
+                                     sizeof(sbl)))
             {
                 LE_ERROR("Read of SBL at sector %d fails: %m", sblBlk );
                 goto error;
@@ -801,7 +993,7 @@ static le_result_t WriteDataSBL
 
             // Erase the half of the partition to be sure that in case of bad blocks, the
             // SBL will be safely written
-            snprintf(cmdBuf, sizeof(cmdBuf), FLASH_ERASE " /dev/mtd%d 0x%08x %u",
+            snprintf(cmdBuf, sizeof(cmdBuf), FLASH_ERASE " " MTD_NAME "%d 0x%08x %u",
                      mtdNum, atOffset, mtdInfo.nbBlk / 2);
             LE_DEBUG("(%d)cmd: %s\n", pass, cmdBuf);
             rc = system(cmdBuf);
@@ -853,7 +1045,7 @@ static le_result_t WriteDataSBL
             // Skip the first page to invalidate the SBL signature
             atOffset = (sblBaseBlk * mtdInfo.eraseSize) + mtdInfo.writeSize;
 
-            snprintf(cmdBuf, sizeof(cmdBuf), NANDWRITE " -s 0x%x -p /dev/mtd%d -",
+            snprintf(cmdBuf, sizeof(cmdBuf), NANDWRITE " -s 0x%x -p " MTD_NAME "%d -",
                          atOffset, mtdNum);
             LE_DEBUG("(%d)Popen to %s\n", pass, cmdBuf);
             FdNandWrite = popen( cmdBuf, "we" );
@@ -862,18 +1054,33 @@ static le_result_t WriteDataSBL
                 LE_ERROR ("(%d)popen to nandwrite failed : %m\n", pass);
                 goto critical;
             }
-            if (1 != fwrite((RawImagePtr + mtdInfo.writeSize),
-                            (ImageSize - mtdInfo.writeSize), 1, FdNandWrite) )
+            if (1 != fwrite((RawImagePtr[0] + mtdInfo.writeSize),
+                            (sblNbBlk > 1 ? mtdInfo.eraseSize : ImageSize) - mtdInfo.writeSize,
+                            1,
+                            FdNandWrite) )
             {
                 LE_ERROR("(%d)fwrite to nandwrite fails: %m\n", pass);
                 goto critical;
+            }
+            for (sblIdxBlk = 1; sblIdxBlk < sblNbBlk && RawImagePtr[sblIdxBlk]; sblIdxBlk++)
+            {
+                if (1 != fwrite(RawImagePtr[sblIdxBlk],
+                                ((sblIdxBlk * mtdInfo.eraseSize) < ImageSize ?
+                                   mtdInfo.eraseSize :
+                                   ImageSize - (sblIdxBlk * mtdInfo.eraseSize)),
+                                 1,
+                                 FdNandWrite) )
+                {
+                    LE_ERROR("(%d)fwrite to nandwrite fails: %m\n", pass);
+                    goto critical;
+                }
             }
             pclose( FdNandWrite );
             FdNandWrite = NULL;
 
             atOffset = sblBaseBlk * mtdInfo.eraseSize;
 
-            snprintf(cmdBuf, sizeof(cmdBuf), NANDWRITE " -s 0x%x -p /dev/mtd%d -",
+            snprintf(cmdBuf, sizeof(cmdBuf), NANDWRITE " -s 0x%x -p " MTD_NAME "%d -",
                          atOffset, mtdNum);
             LE_DEBUG("(%d)Popen to %s\n", pass, cmdBuf);
             FdNandWrite = popen( cmdBuf, "we" );
@@ -882,13 +1089,28 @@ static le_result_t WriteDataSBL
                 LE_ERROR ("(%d)popen to nandwrite failed : %m\n", pass);
                 goto critical;
             }
-            if (1 != fwrite(RawImagePtr, mtdInfo.writeSize, 1, FdNandWrite) )
+            if (1 != fwrite(RawImagePtr[0], mtdInfo.writeSize, 1, FdNandWrite) )
             {
                 LE_ERROR("(%d)fwrite to nandwrite fails: %m\n", pass);
                 goto critical;
             }
             pclose( FdNandWrite );
             FdNandWrite = NULL;
+
+            if (LE_OK != CheckData( mtdNum, &mtdInfo, ImageSize, atOffset, hdrPtr->CRC32 ))
+            {
+                LE_CRIT("SBL flash failed at block %d. Erasing...", sblBaseBlk);
+                // Erase blocks related to the temporary SBL: high if SBL low; low if SBL is high
+                snprintf(cmdBuf, sizeof(cmdBuf), FLASH_ERASE " " MTD_NAME "%d 0x%08x %u",
+                         mtdNum, atOffset, mtdInfo.nbBlk / 2);
+                LE_DEBUG("(%d)cmd: %s\n", pass, cmdBuf);
+                rc = system(cmdBuf);
+                if (WEXITSTATUS(rc))
+                {
+                     LE_ERROR ("(C)Flash erase failed: %d\n", WEXITSTATUS(rc));
+                }
+                goto critical;
+            }
 
             // Do low and high or high and low: 2 passes
         } while (++pass < SBL_MAX_PASS);
@@ -896,7 +1118,7 @@ static le_result_t WriteDataSBL
         atOffset = (sblBlk ? 0 : mtdInfo.nbBlk / 2) * mtdInfo.eraseSize;
 
         // Erase blocks related to the temporary SBL: high if SBL low; low if SBL is high
-        snprintf(cmdBuf, sizeof(cmdBuf), FLASH_ERASE " /dev/mtd%d 0x%08x %u",
+        snprintf(cmdBuf, sizeof(cmdBuf), FLASH_ERASE " " MTD_NAME "%d 0x%08x %u",
                  mtdNum, atOffset, mtdInfo.nbBlk / 2);
         LE_DEBUG("(E)cmd: %s\n", cmdBuf);
         rc = system(cmdBuf);
@@ -907,6 +1129,8 @@ static le_result_t WriteDataSBL
         }
 
         close(mtdFd);
+        for (sblIdxBlk = 0; (sblIdxBlk < sblNbBlk) && RawImagePtr[sblIdxBlk]; sblIdxBlk++)
+            le_mem_Release(RawImagePtr[sblIdxBlk]);
         le_mem_Release(RawImagePtr);
         RawImagePtr = NULL;
         ImageSize = 0;
@@ -928,6 +1152,8 @@ error:
     }
     if (RawImagePtr)
     {
+        for (sblIdxBlk = 0; (sblIdxBlk < sblNbBlk) && RawImagePtr[sblIdxBlk]; sblIdxBlk++)
+            le_mem_Release(RawImagePtr[sblIdxBlk]);
         le_mem_Release(RawImagePtr);
     }
     RawImagePtr = NULL;
@@ -1007,6 +1233,7 @@ static le_result_t WriteData
 )
 {
     int rc;
+    int mtdNum;
     le_result_t ret = LE_OK;
     pa_fwupdate_MtdInfo_t mtdInfo;
 
@@ -1027,7 +1254,6 @@ static le_result_t WriteData
 
     if ((0 == offset) && (NULL == FdNandWrite) && (0 == ImageSize) )
     {
-        int mtdNum;
         char cmdBuf[CMD_BUFFER_LENGTH];
 
         mtdNum = GetMtdFromImageType( hdrPtr->ImageType, 1, &MtdNamePtr, &mtdInfo );
@@ -1041,7 +1267,7 @@ static le_result_t WriteData
                  MtdNamePtr, mtdNum, hdrPtr->ImageType );
 
         /* erase the flash blocks related to the MTD mtdNum */
-        snprintf(cmdBuf, sizeof(cmdBuf), FLASH_ERASE " /dev/mtd%d 0x%08x %u >/dev/null", mtdNum,
+        snprintf(cmdBuf, sizeof(cmdBuf), FLASH_ERASE " " MTD_NAME "%d 0x%08x %u >/dev/null", mtdNum,
                  mtdInfo.startOffset, mtdInfo.nbBlk);
         LE_DEBUG( "cmd: %s\n", cmdBuf);
         rc = system(cmdBuf);
@@ -1050,7 +1276,7 @@ static le_result_t WriteData
             LE_ERROR ("Flash erase failed: %d\n", WEXITSTATUS(rc));
             return LE_FAULT;
         }
-        snprintf(cmdBuf, sizeof(cmdBuf), NANDWRITE " -s %u -p /dev/mtd%d - >/dev/null",
+        snprintf(cmdBuf, sizeof(cmdBuf), NANDWRITE " -s %u -p " MTD_NAME "%d - >/dev/null",
                  mtdInfo.startOffset, mtdNum);
         LE_DEBUG( "Popen to %s\n", cmdBuf );
         FdNandWrite = popen( cmdBuf, "we" );
@@ -1076,6 +1302,15 @@ static le_result_t WriteData
         FdNandWrite = NULL;
         LE_INFO( "Update for partiton %s done with return %d\n", MtdNamePtr, ret );
         MtdNamePtr = NULL;
+
+        mtdNum = GetMtdFromImageType( hdrPtr->ImageType, 1, &MtdNamePtr, &mtdInfo );
+        if( -1 == mtdNum )
+        {
+            LE_ERROR( "Unable to find a valid mtd for image type %d\n", hdrPtr->ImageType );
+            return LE_FAULT;
+        }
+
+        ret = CheckData( mtdNum, &mtdInfo, hdrPtr->ImageSize, 0, hdrPtr->CRC32 );
     }
     return ret;
 error:
@@ -1243,29 +1478,6 @@ static void TranslateNetworkByteOrderMulti
     }
 
     *packetPtrPtr = packetPtr;
-}
-
-//--------------------------------------------------------------------------------------------------
-/**
- * This function is used to calculate a CRC-32
- *
- * @return
- *      - 32-bit CRC
- */
-//--------------------------------------------------------------------------------------------------
-static uint32_t Crc32
-(
-    uint8_t* addressPtr,///< [IN] Input buffer
-    uint32_t size,      ///< [IN] Number of bytes to read
-    uint32_t crc        ///< [IN] Starting CRC seed
-)
-{
-    for (; size > 0 ; size--)
-    {
-        //-- byte loop */
-        crc = (((crc >> 8) & 0x00FFFFFF) ^ Crc32Table[(crc ^ *addressPtr++) & 0x000000FF]);
-    }
-    return crc;
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -1627,9 +1839,10 @@ le_result_t pa_fwupdate_DualSysSync
     pa_fwupdate_MtdInfo_t mtdInfoSrc, mtdInfoDst;
     char* mtdSrcNamePtr;
     char* mtdDstNamePtr;
-    char mtdName[CMD_BUFFER_LENGTH];
+    char mtdName[MTD_NAME_LENGTH];
     char cmdBuf[CMD_BUFFER_LENGTH];
     uint8_t* flashBlockPtr = NULL;
+    uint32_t crc32Src;
 
     if( -1 == (iniBootSystem = GetInitialBootSystem()) )
     {
@@ -1677,8 +1890,8 @@ le_result_t pa_fwupdate_DualSysSync
                      mtdDst, mtdInfoDst.size, mtdInfoDst.eraseSize, mtdInfoDst.nbBlk,
                      mtdInfoDst.startOffset );
             snprintf( cmdBuf, sizeof(cmdBuf),
-                      FLASH_ERASE " /dev/mtd%d 0x%08x %u && "
-                      NANDWRITE " -s %u /dev/mtd%d -",
+                      FLASH_ERASE " " MTD_NAME "%d 0x%08x %u && "
+                      NANDWRITE " -s %u " MTD_NAME "%d -",
                       mtdDst, mtdInfoDst.startOffset, mtdInfoDst.nbBlk,
                       mtdInfoDst.startOffset, mtdDst );
             LE_INFO( "Logical %s update: \n%s\n", dualBootSystem ? "2" : "1", cmdBuf );
@@ -1687,8 +1900,8 @@ le_result_t pa_fwupdate_DualSysSync
         {
             /* erase the destination mtd and copy source mtd to destination one */
             snprintf( cmdBuf, sizeof(cmdBuf),
-                      FLASH_ERASE " /dev/mtd%d 0 0 && "
-                      NANDWRITE " /dev/mtd%d -",
+                      FLASH_ERASE " " MTD_NAME "%d 0 0 && "
+                      NANDWRITE " " MTD_NAME "%d -",
                       mtdDst, mtdDst );
         }
         LE_INFO( "Synchronizing %s partition \"%s%s\" (mtd%d) from \"%s%s\" (mtd%d)\n",
@@ -1716,11 +1929,13 @@ le_result_t pa_fwupdate_DualSysSync
             goto error;
         }
 
-        int nbBlk;
+        int nbBlk, nbSrcBlkCnt; // Counter to maximum block to be checked
         loff_t blkOff;
         bool isSigPipe = false;
 
-        for (nbBlk = 0; !isSigPipe && (nbBlk < mtdInfoSrc.nbBlk); nbBlk++)
+        crc32Src = START_CRC32;
+
+        for (nbSrcBlkCnt = nbBlk = 0; !isSigPipe && (nbBlk < mtdInfoSrc.nbBlk); nbBlk++)
         {
             blkOff = (loff_t)mtdInfoSrc.startOffset + ((loff_t)nbBlk * mtdInfoSrc.eraseSize);
             if (-1 == (rc = ioctl(flashFd, MEMGETBADBLOCK, &blkOff)))
@@ -1734,22 +1949,11 @@ le_result_t pa_fwupdate_DualSysSync
             }
             else
             {
-                do
+                if (LE_OK != ReadDataAt( flashFd, blkOff, flashBlockPtr, mtdInfoSrc.eraseSize ))
                 {
-                    // Until read(2) succeed, set the position to the block to read
-                    rc = lseek(flashFd, (off_t)blkOff, SEEK_SET);
-                    if ((-1 == rc))
-                    {
-                        LE_ERROR("lseek fails for block %d: %m", nbBlk);
-                        goto error;
-                    }
-                    rc = read(flashFd, flashBlockPtr, mtdInfoSrc.eraseSize);
-                    if ((-1 == rc) && (EINTR != errno))
-                    {
-                        LE_ERROR("read fails for block %d: %m", nbBlk);
-                        goto error;
-                    }
-                } while (rc != mtdInfoSrc.eraseSize);
+                    LE_ERROR("read fails for block %d: %m", nbBlk);
+                    goto error;
+                }
 
                 if (1 != fwrite(flashBlockPtr, mtdInfoSrc.eraseSize, 1, FdNandWrite) )
                 {
@@ -1765,11 +1969,27 @@ le_result_t pa_fwupdate_DualSysSync
                         goto error;
                     }
                 }
+                else
+                {
+                    crc32Src = Crc32(flashBlockPtr, mtdInfoSrc.eraseSize, crc32Src);
+                    nbSrcBlkCnt ++;
+                }
+
             }
         }
-        close(flashFd);
         pclose( FdNandWrite );
         FdNandWrite = NULL;
+
+        if( LE_OK != CheckData( mtdDst,
+                                &mtdInfoDst,
+                                nbSrcBlkCnt * mtdInfoSrc.eraseSize,
+                                0,
+                                crc32Src ) ) {
+            goto error;
+        }
+
+        close(flashFd);
+
     }
 
     le_mem_Release(flashBlockPtr);
@@ -2215,10 +2435,15 @@ COMPONENT_INIT
     mtdNum = GetMtdFromImageType( CWE_IMAGE_TYPE_SBL1, 1, &MtdNamePtr, &mtdInfo );
     LE_FATAL_IF(-1 == mtdNum, "Unable to find a valid mtd for SBL image\n");
 
-    /* Allocate a pool for the SBL image */
-    FlashImgPool = le_mem_CreatePool("FlashImagePool",
-                                   (mtdInfo.nbBlk / 2) * mtdInfo.eraseSize);
-    le_mem_ExpandPool(FlashImgPool, 1);
+    /* Allocate a pool for the blocks to be flashed and checked */
+    FlashImgPool = le_mem_CreatePool("FlashImagePool", mtdInfo.eraseSize);
+    /* Request 3 blocks: 1 for flash, 1 spare, 1 for check */
+    le_mem_ExpandPool(FlashImgPool, 3);
+
+    /* Allocate a pool for the array to SBL blocks */
+    SblBlockPool = le_mem_CreatePool("SBL Block Pool",
+                                     sizeof(uint8_t*) * (mtdInfo.size / 2));
+    le_mem_ExpandPool(SblBlockPool, 1);
 
     /* Install a SIGPIPE handler for popen(3) to nandwrite
        When signal is caught, it is ignored, but EPIPE is returned from fwrite(3) */
