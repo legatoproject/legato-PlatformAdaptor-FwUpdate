@@ -33,6 +33,10 @@
 // Command buffer length used for popen(3) and system(3)
 #define CMD_BUFFER_LENGTH       256
 
+// PBL is looking for SBL signature in the first 2MB of the flash device
+// Should avoid to put SBL outside this
+#define SBL_MAX_BASE_IN_FIRST_2MB  (2*1024*1024)
+
 // Timeout for select(): Set to 30s to give time for connection through socket
 #define SET_SELECT_TIMEOUT( tv ) \
         do { \
@@ -837,6 +841,7 @@ static le_result_t WriteDataSBL
             // Not enougth block to flash the SBL
             if ((sblBaseBlk == -1) ||
                 (sblBaseBlk > (atMaxBlk - sblNbBlk)) ||
+                (sblBaseBlk >= (SBL_MAX_BASE_IN_FIRST_2MB / mtdInfo.eraseSize)) ||
                 (nbBadBlk > ((mtdInfo.nbBlk / 2) - sblNbBlk)))
             {
                 LE_CRIT("(%d)Not enough blocks to update the SBL: Aborting", pass);
