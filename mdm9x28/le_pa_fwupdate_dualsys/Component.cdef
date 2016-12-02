@@ -13,5 +13,6 @@ sources:
 
 cflags:
 {
+    -DPA_FWUPDATE_PRODUCT_ID=0x39583238
     -I$LEGATO_ROOT/components/fwupdate/platformAdaptor/inc
 }
