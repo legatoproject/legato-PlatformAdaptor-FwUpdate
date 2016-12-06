@@ -43,16 +43,16 @@
 //--------------------------------------------------------------------------------------------------
 typedef struct
 {
-    uint8_t DescriptorVersion;                  ///< Descriptor version
-    uint8_t Type;                               ///< Component type
-    uint8_t Flag;                               ///< Component flag (for extended descriptor enable
+    uint8_t descriptorVersion;                  ///< Descriptor version
+    uint8_t type;                               ///< Component type
+    uint8_t flag;                               ///< Component flag (for extended descriptor enable
                                                 ///< /disable)
-    uint8_t Reserved;                           ///< Reserved for future use
-    uint32_t Offset;                            ///< offset from start of update package to start
+    uint8_t reserved;                           ///< Reserved for future use
+    uint32_t offset;                            ///< offset from start of update package to start
                                                 ///< of component
-    uint32_t Size;                              ///< Size of component (in bytes)
-    uint8_t SourceVersion[HDRSOURCEVERSION];    ///< Source version
-    uint32_t Reserved2;                         ///< Reserved for future use
+    uint32_t size;                              ///< Size of component (in bytes)
+    uint8_t sourceVersion[HDRSOURCEVERSION];    ///< Source version
+    uint32_t reserved2;                         ///< Reserved for future use
 }
 pa_fwupdateCweFilePsb_t;
 
@@ -64,22 +64,22 @@ pa_fwupdateCweFilePsb_t;
 typedef struct
 {
     pa_fwupdateCweFilePsb_t PSB[HDRPSBLEN];   ///< Product specific buffer
-    uint32_t CRCProdBuf;                      ///< CRC of Product Specific Buffer
-    uint32_t HdrRevNum;                       ///< Header revision number
-    uint32_t CRCIndicator;                    ///< Update Package CRC valid indicator
-    uint32_t ImageType;                       ///< Image type
-    uint32_t ProdType;                        ///< Product type
-    uint32_t ImageSize;                       ///< Update Package size
-    uint32_t CRC32;                           ///< CRC32 of Update Package image body
-    uint8_t  Version[HVERSTRSIZE];            ///< Version/Time
-    uint8_t  RelDate[HDATESIZE];              ///< Release Date string
-    uint32_t Compat;                          ///< Backward compat field
-    uint8_t  MiscOpts;                        ///< Misc Options field
-    uint8_t  HdrRes[3];                       ///< Header reserved
-    uint32_t StorAddr;                        ///< Storage address
-    uint32_t ProgAddr;                        ///< Program reloc. Address
-    uint32_t Entry;                           ///< Entry Point address
-    uint32_t Signature;                       ///< Application Signature
+    uint32_t crcProdBuf;                      ///< CRC of Product Specific Buffer
+    uint32_t hdrRevNum;                       ///< Header revision number
+    uint32_t crcIndicator;                    ///< Update Package CRC valid indicator
+    uint32_t imageType;                       ///< Image type
+    uint32_t prodType;                        ///< Product type
+    uint32_t imageSize;                       ///< Update Package size
+    uint32_t crc32;                           ///< CRC32 of Update Package image body
+    uint8_t  version[HVERSTRSIZE];            ///< Version/Time
+    uint8_t  relDate[HDATESIZE];              ///< Release Date string
+    uint32_t compat;                          ///< Backward compat field
+    uint8_t  miscOpts;                        ///< Misc Options field
+    uint8_t  hdrRes[3];                       ///< Header reserved
+    uint32_t storAddr;                        ///< Storage address
+    uint32_t progAddr;                        ///< Program reloc. Address
+    uint32_t entry;                           ///< Entry Point address
+    uint32_t signature;                       ///< Application Signature
 }
 pa_fwupdate_CweHeader_t;
 
@@ -173,7 +173,7 @@ pa_fwupdate_ImageType_t;
 //--------------------------------------------------------------------------------------------------
 LE_SHARED size_t pa_fwupdate_ImageData
 (
-    pa_fwupdate_CweHeader_t *CweHeader, ///<[IN] CWE header linked to image data
+    pa_fwupdate_CweHeader_t *cweHeader, ///<[IN] CWE header linked to image data
     uint8_t* chunk,                     ///< [IN]Data to be written in flash partition
     size_t length                       ///< [IN]Data length to be written in flash partition
 );
