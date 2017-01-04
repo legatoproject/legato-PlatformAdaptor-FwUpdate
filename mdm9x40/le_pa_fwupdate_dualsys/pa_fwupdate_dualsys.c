@@ -887,7 +887,7 @@ static le_result_t WriteDataSBL
         // Allocate a block to store the SBL temporary image
         ImageSize = hdrPtr->imageSize;
         RawImagePtr = (uint8_t **) le_mem_ForceAlloc(SblBlockPool);
-        memset(RawImagePtr, 0, sizeof(uint8_t*) * (mtdInfo.size / 2));
+        memset(RawImagePtr, 0, sizeof(uint8_t*) * (mtdInfo.nbBlk / 2));
     }
 
     // Check that the chunck is inside the SBL temporary image
@@ -1153,7 +1153,9 @@ error:
     if (RawImagePtr)
     {
         for (sblIdxBlk = 0; (sblIdxBlk < sblNbBlk) && RawImagePtr[sblIdxBlk]; sblIdxBlk++)
+        {
             le_mem_Release(RawImagePtr[sblIdxBlk]);
+        }
         le_mem_Release(RawImagePtr);
     }
     RawImagePtr = NULL;
@@ -2442,7 +2444,7 @@ COMPONENT_INIT
 
     /* Allocate a pool for the array to SBL blocks */
     SblBlockPool = le_mem_CreatePool("SBL Block Pool",
-                                     sizeof(uint8_t*) * (mtdInfo.size / 2));
+                                     sizeof(uint8_t*) * (mtdInfo.nbBlk / 2));
     le_mem_ExpandPool(SblBlockPool, 1);
 
     /* Install a SIGPIPE handler for popen(3) to nandwrite
