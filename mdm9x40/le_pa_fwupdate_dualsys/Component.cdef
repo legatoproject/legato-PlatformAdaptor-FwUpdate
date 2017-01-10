@@ -1,0 +1,20 @@
+requires:
+{
+    api:
+    {
+        le_fwupdate.api  [types-only]
+    }
+}
+
+sources:
+{
+    pa_fwupdate_dualsys.c
+    ../../pa_flash/src/pa_flash_mtd.c
+}
+
+cflags:
+{
+    -DPA_FWUPDATE_PRODUCT_ID=0x39583430
+    -I$LEGATO_FWUPDATE_PA_DUALSYS/../../pa_flash/inc
+    -I$LEGATO_ROOT/components/fwupdate/platformAdaptor/inc
+}
