@@ -395,6 +395,14 @@ static char* pa_fwupdate_PartNamePtr[2][ CWE_IMAGE_TYPE_COUNT ] = {
     },
 };
 
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Cwe Header in raw format (before decoding). Used for NVUP.
+ */
+//--------------------------------------------------------------------------------------------------
+static uint8_t CweHeaderRaw[HEADER_SIZE];
+
 //==================================================================================================
 //                                       Private Functions
 //==================================================================================================
@@ -1204,6 +1212,15 @@ static le_result_t WriteNvup
 
     if ((ImageSize == 0) && (offset == 0))
     {
+        // write the CWE header
+        result = pa_fwupdate_NvupWrite(HEADER_SIZE, CweHeaderRaw, false);
+        if (result != LE_OK)
+        {
+            LE_ERROR("Failed to write NVUP CWE header!\n");
+            return LE_FAULT;
+        }
+
+        // initialize data phase
         ImageSize = hdrPtr->imageSize;
         LE_DEBUG("ImageSize=%d", ImageSize);
     }
@@ -1213,6 +1230,10 @@ static le_result_t WriteNvup
 
     result = pa_fwupdate_NvupWrite(*lengthPtr, dataPtr, isEnd);
 
+    if (isEnd)
+    {
+        ImageSize = 0;
+    }
     return result;
 }
 
@@ -1769,6 +1790,14 @@ static le_result_t DataParseAndStore
                         /* Next data will concern a component image */
                         IsImageToBeRead = true;
                     }
+                    if (CurrentCweHeader.imageType == CWE_IMAGE_TYPE_FILE)
+                    {
+                        memcpy(CweHeaderRaw, chunkPtr, HEADER_SIZE);
+                    }
+                    if (CurrentCweHeader.imageType == CWE_IMAGE_TYPE_MODM)
+                    {
+                        IsModemDownloaded = true;
+                    }
                 }
             }
             else
@@ -2128,10 +2157,6 @@ size_t pa_fwupdate_ImageData
                             (uint32_t)CurrentImageOffset, cweHeaderPtr->imageType);
             }
             IsImageToBeRead = false;
-            if (cweHeaderPtr->imageType == CWE_IMAGE_TYPE_MODM)
-            {
-                IsModemDownloaded = true;
-            }
         }
     }
 
