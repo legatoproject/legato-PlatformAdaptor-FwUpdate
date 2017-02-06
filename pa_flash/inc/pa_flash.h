@@ -88,6 +88,13 @@ typedef unsigned int pa_flash_OpenMode_t;
 
 //--------------------------------------------------------------------------------------------------
 /**
+ * Define the maximum length of a partition name
+ */
+//--------------------------------------------------------------------------------------------------
+#define PA_FLASH_MAX_INFO_NAME (128)
+
+//--------------------------------------------------------------------------------------------------
+/**
  * LEB to PEB translation array
  * Map of logical erase block (LEB) to physical erase block (PEB)
  * If a bad block is found, the PEB is incremented, but not the LEB
@@ -114,6 +121,8 @@ typedef struct
     uint32_t nbLeb;       ///< number of logical blocks (= nbBlk until pa_flash_Scan is called)
     bool     logical;     ///< flag for logical partitions
     bool     ubi;         ///< flag for UBI management on physical partition
+    char     name[PA_FLASH_MAX_INFO_NAME];
+                          ///< name of the partition
 }
 pa_flash_Info_t;
 

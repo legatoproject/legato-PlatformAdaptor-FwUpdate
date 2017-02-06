@@ -155,6 +155,7 @@ le_result_t pa_flash_GetInfo
 {
     FILE *mtdFdPtr;
     char mtd[PA_FLASH_SYS_CLASS_MTD_LENGTH];
+    char *crPtr;
 
     if( !infoPtr )
     {
@@ -196,6 +197,22 @@ le_result_t pa_flash_GetInfo
     fscanf( mtdFdPtr, "%d", &(infoPtr->eraseSize) );
     fclose( mtdFdPtr );
 
+    // If MTD number is valid, try to read the partition name
+    snprintf( mtd, sizeof(mtd), PA_FLASH_SYS_CLASS_MTD "name", mtdNum );
+    mtdFdPtr = fopen( mtd, "r" );
+    if( NULL == mtdFdPtr )
+    {
+        LE_ERROR( "Unable to read partition name for mtd %d: %m\n", mtdNum );
+        return LE_UNSUPPORTED;
+    }
+    fgets( infoPtr->name, PA_FLASH_MAX_INFO_NAME, mtdFdPtr );
+    fclose( mtdFdPtr );
+    crPtr = strchr( infoPtr->name, '\n' );
+    if( crPtr )
+    {
+        *crPtr = '\0';
+    }
+
     if( isLogical )
     {
         infoPtr->size /= 2;
@@ -205,8 +222,10 @@ le_result_t pa_flash_GetInfo
     infoPtr->nbLeb = infoPtr->nbBlk;
     infoPtr->startOffset = (isLogical && isDual) ? infoPtr->size : 0;
 
-    LE_INFO("MTD %d: size %x (nbBlk %u), writeSize %x, eraseSize %x\n",
-            mtdNum, infoPtr->size,
+    LE_INFO("MTD %d \"%s\": size %x (nbBlk %u), writeSize %x, eraseSize %x\n",
+            mtdNum,
+            infoPtr->name,
+            infoPtr->size,
             infoPtr->nbBlk,
             infoPtr->writeSize,
             infoPtr->eraseSize);
