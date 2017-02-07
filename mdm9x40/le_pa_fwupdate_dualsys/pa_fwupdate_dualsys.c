@@ -1540,9 +1540,6 @@ static le_result_t WriteData
     static pa_flash_Info_t *FlashInfoPtr;  // MTD information of the current MTD
     static pa_flash_Desc_t MtdFd = NULL; // File descriptor for MTD operations
 
-    LE_DEBUG ("Format %d image type %d len %d offset %d",
-              format, hdrPtr->imageType, *lengthPtr, offset);
-
     if( isFlashed )
     {
         *isFlashed = false;
@@ -1573,6 +1570,9 @@ static le_result_t WriteData
         LE_CRIT( "Closing and releasing MTD due to forceClose\n" );
         goto error;
     }
+
+    LE_DEBUG ("Format %d image type %d len %d offset %d",
+              format, hdrPtr->imageType, *lengthPtr, offset);
 
     if ((0 == offset) && (NULL == MtdFd) && (0 == ImageSize) )
     {
