@@ -41,6 +41,27 @@
             (tv)->tv_usec = 0; \
         } while (0)
 
+//--------------------------------------------------------------------------------------------------
+/**
+ * "ubi" string length
+ */
+//--------------------------------------------------------------------------------------------------
+#define UBI_STRING_LENGTH      3
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * "/sys/class/ubi" access path
+ */
+//--------------------------------------------------------------------------------------------------
+#define SYS_CLASS_UBI_PATH     "/sys/class/ubi"
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * "/sys/class/mtd" access path
+ */
+//--------------------------------------------------------------------------------------------------
+#define SYS_CLASS_MTD_PATH     "/sys/class/mtd"
+
 //==================================================================================================
 //                                       Static variables
 //==================================================================================================
@@ -168,7 +189,11 @@ static const char ImageString [CWE_IMAGE_TYPE_COUNT][sizeof(uint32_t)] =
     { 'T', 'Z', 'O', 'N' },     ///<  QCT Trust-Zone Image
     { 'Q', 'S', 'D', 'I' },     ///<  QCT System Debug Image
     { 'A', 'R', 'C', 'H' },     ///<  Archive
-    { 'U', 'A', 'P', 'P' },     ///<  USER APP Image
+    { 'U', 'A', 'P', 'P' },     ///<  USER APP image
+    { 'L', 'R', 'A', 'M' },     ///<  Linux RAM image
+    { 'C', 'U', 'S', '0' },     ///<  Customer 0 or 1 image in dual system
+    { 'C', 'U', 'S', '1' },     ///<  Customer 0 or 1 image in dual system
+    { 'C', 'U', 'S', '2' },     ///<  Customer 2 image
 };
 
 //--------------------------------------------------------------------------------------------------
@@ -256,6 +281,10 @@ static char* pa_fwupdate_PartNamePtr[2][ CWE_IMAGE_TYPE_COUNT ] = {
         NULL,
         NULL,
         "userapp",
+        NULL,
+        "customer0",
+        "customer0",
+        "customer2",
     },
     {
         NULL,
@@ -291,6 +320,10 @@ static char* pa_fwupdate_PartNamePtr[2][ CWE_IMAGE_TYPE_COUNT ] = {
         NULL,
         NULL,
         "userapp",
+        NULL,
+        "customer1",
+        "customer1",
+        "customer2",
     },
 };
 
@@ -366,7 +399,7 @@ static le_result_t GetInitialBootSystemByUbi
     le_result_t le_result = LE_OK;
 
     // Try to open the MTD belonging to ubi0
-    if( NULL == (flashFdPtr = fopen( "/sys/class/ubi/ubi0/mtd_num", "r" )) )
+    if( NULL == (flashFdPtr = fopen( SYS_CLASS_UBI_PATH "/ubi0/mtd_num", "r" )) )
     {
         LE_ERROR( "Unable to determine ubi0 mtd device: %m\n" );
         le_result = LE_FAULT;
@@ -409,7 +442,7 @@ static le_result_t GetImageTypeFromMtd
     int partIndex, partSystem;
 
     // Open the partition name belonging the given MTD number
-    snprintf( mtdBuf, sizeof(mtdBuf), "/sys/class/mtd/mtd%d/name", mtdNum );
+    snprintf( mtdBuf, sizeof(mtdBuf), SYS_CLASS_MTD_PATH "/mtd%d/name", mtdNum );
     if( NULL == (flashFdPtr = fopen( mtdBuf, "r" )) )
     {
         LE_ERROR( "Unable to open %s: %m\n", mtdBuf );
@@ -588,14 +621,108 @@ static int GetMtdFromImageType
 
 //--------------------------------------------------------------------------------------------------
 /**
+ * This function checks if the partition related to the given MTD is currently mounted or is
+ * attached to an UBI.
+ *
+ * @return
+ *      - LE_OK            The partition is not mounted and not attached to an UBI
+ *      - LE_BAD_PARAMETER The MTD number is negative
+ *      - LE_BUSY          The partition is currently mounted or attached
+ *      - LE_FAULT         If an error occurs
+ */
+//--------------------------------------------------------------------------------------------------
+static le_result_t CheckIfMounted
+(
+    int mtdNum
+)
+{
+    DIR *dirPtr;
+    struct dirent *direntPtr, *direntResPtr;
+    uint8_t direntTab[offsetof(struct dirent, d_name) + PATH_MAX + 1];
+    FILE *fd;
+    int  ubiMtdNum = - 1;
+    char ubiMtdNumStr[PATH_MAX];
+    char mountStr[PATH_MAX];
+    le_result_t res = LE_OK;
+
+    if( 0 > mtdNum )
+    {
+        return LE_BAD_PARAMETER;
+    }
+
+    // Check if the MTD is attached as UBI
+    dirPtr = opendir( SYS_CLASS_UBI_PATH );
+    if( dirPtr )
+    {
+        direntPtr = (struct dirent *)&direntTab;
+        // Read all entries in the directory
+        while( (0 == readdir_r( dirPtr, direntPtr, &direntResPtr )) && (direntResPtr) )
+        {
+           if( (0 == strncmp( "ubi", direntPtr->d_name, UBI_STRING_LENGTH )) &&
+               (isdigit( direntPtr->d_name[UBI_STRING_LENGTH] )) &&
+               (!strchr( direntPtr->d_name, '_')) )
+           {
+               snprintf( ubiMtdNumStr, sizeof(ubiMtdNumStr), SYS_CLASS_UBI_PATH "/%s/mtd_num",
+                         direntPtr->d_name );
+               ubiMtdNum = - 1;
+               // Try to read the MTD number attached to this UBI
+               fd = fopen( ubiMtdNumStr, "r" );
+               if( fd )
+               {
+                   fscanf( fd, "%d", &ubiMtdNum );
+                   fclose( fd );
+               }
+               else
+               {
+                   // Skip if the open fails
+                   continue;
+               }
+               if( ubiMtdNum == mtdNum )
+               {
+                   // When the MTD is attached, we consider it is busy and reject it
+                   LE_ERROR("MTD %d is attached to UBI %s. Device is busy",
+                            mtdNum, direntPtr->d_name);
+                   res = LE_BUSY;
+                   break;
+               }
+           }
+        }
+        closedir( dirPtr );
+    }
+    // Not attached to UBI, look into the /proc/mounts
+    if( ubiMtdNum != mtdNum )
+    {
+        snprintf( ubiMtdNumStr, sizeof(ubiMtdNumStr), "/dev/mtdblock%d ", mtdNum );
+        fd = fopen( "/proc/mounts", "r" );
+        if( fd )
+        {
+            while( fgets( mountStr, sizeof(mountStr), fd ) )
+            {
+                if( 0 == strncmp( mountStr, ubiMtdNumStr, strlen(ubiMtdNumStr) ) )
+                {
+                    LE_ERROR("MTD %d s mounted. Device is busy", mtdNum);
+                    res = LE_BUSY;
+                    break;
+                }
+            }
+            fclose(fd);
+        }
+        else
+        {
+            res = LE_FAULT;
+        }
+    }
+
+    return res;
+}
+
+//--------------------------------------------------------------------------------------------------
+/**
  * This function is used to get a 32 bit value from a packet in network byte order, convert it to
  * host order and increment the packet pointer beyond the extracted field
  *
  * @return
- *      - LE_OK            The request was accepted
- *      - LE_BAD_PARAMETER The parameter is invalid
- *      - LE_NOT_POSSIBLE  The action is not compliant with the SW update state (no downloaded pkg)
- *      - LE_FAULT         If an error occurs
+ *      - The value in HOST endianess, and the pointer incremented from one 32-bits size
  */
 //--------------------------------------------------------------------------------------------------
 static uint32_t TranslateNetworkByteOrder
@@ -854,6 +981,12 @@ static le_result_t ApplyPatch
 
     if( !InPatch )
     {
+        if( LE_OK != CheckIfMounted( mtdDestNum ) )
+        {
+            LE_ERROR("MTD %d is mounted", mtdDestNum);
+            goto error;
+        }
+
         // No patch in progress. This is a new patch
         memset( &PatchHdr, 0, sizeof(PatchHdr) );
         PatchCrc32 = LE_CRC_START_CRC32;
@@ -1586,6 +1719,12 @@ static le_result_t WriteData
         LE_INFO ("Writing \"%s\" (mtd%d) from CWE image %d\n",
                  MtdNamePtr, mtdNum, hdrPtr->imageType );
 
+        if( LE_OK != CheckIfMounted( mtdNum ) )
+        {
+            LE_ERROR("MTD %d is mounted", mtdNum);
+            return LE_FAULT;
+        }
+
         if(LE_OK != pa_flash_Open( mtdNum,
                              PA_FLASH_OPENMODE_WRITEONLY | PA_FLASH_OPENMODE_MARKBAD |
                                  (isLogical
@@ -2188,7 +2327,7 @@ le_result_t pa_fwupdate_DualSysSync
      * This API is a blocking one
      * Partitions to be synchronized:
      * logical partitions: QSSE and RPM
-     * physical partitions: MODEM, ABOOT, BOOT, SYSTEM, USER0, USER2
+     * physical partitions: MODEM, ABOOT, BOOT, SYSTEM, USER, CUS0
      */
     static pa_fwupdate_ImageType_t syncPartition[] = {
         CWE_IMAGE_TYPE_DSP2,
@@ -2198,6 +2337,7 @@ le_result_t pa_fwupdate_DualSysSync
         CWE_IMAGE_TYPE_USER,
         CWE_IMAGE_TYPE_QRPM,
         CWE_IMAGE_TYPE_TZON,
+        CWE_IMAGE_TYPE_CUS0,
     };
     int iniBootSystem, dualBootSystem;
     int mtdSrc, mtdDst;
