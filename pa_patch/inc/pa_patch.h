@@ -27,8 +27,8 @@
 //--------------------------------------------------------------------------------------------------
 typedef enum
 {
-    PA_PATCH_IMAGE_RAWFLASH = 0,     // RAW flash
-    PA_PATCH_IMAGE_UBIFLASH,         // UBI data info RAW flash
+    PA_PATCH_IMAGE_RAWFLASH = 0,     ///< RAW flash
+    PA_PATCH_IMAGE_UBIFLASH,         ///< UBI data info RAW flash
     PA_PATCH_IMAGE_MAX      = PA_PATCH_IMAGE_UBIFLASH,
 }
 pa_patch_Image_t;
@@ -49,8 +49,10 @@ typedef union
 {
     struct
     {
-        int mtdNum;         // MTD number for RAW flash
-        uint32_t ubiVolId;  // UBI volumr ID for UBI data into RAW flash
+        int mtdNum;         ///< MTD number for RAW flash
+        uint32_t ubiVolId;  ///< UBI volumr ID for UBI data into RAW flash
+        bool isLogical;     ///< MTD is "logical"
+        bool isDual;        ///< "Dual partition" of the "logical" MTD
     }
     flash;
 }
@@ -63,16 +65,16 @@ pa_patch_ImageDesc_t;
 //--------------------------------------------------------------------------------------------------
 typedef struct
 {
-    size_t               segmentSize;
-    off_t                patchOffset;
-    pa_patch_Image_t     origImage;
-    size_t               origImageSize;
-    uint32_t             origImageCrc32;
-    pa_patch_ImageDesc_t origImageDesc;
-    pa_patch_Image_t     destImage;
-    size_t               destImageSize;
-    uint32_t             destImageCrc32;
-    pa_patch_ImageDesc_t destImageDesc;
+    size_t               segmentSize;    ///< Size of the patch segment
+    off_t                patchOffset;    ///< Offset of this segment
+    pa_patch_Image_t     origImage;      ///< Type of image for origin
+    size_t               origImageSize;  ///< Full size of the image for origin
+    uint32_t             origImageCrc32; ///< CRC32 of the image for origin
+    pa_patch_ImageDesc_t origImageDesc;  ///< Device description for origin
+    pa_patch_Image_t     destImage;      ///< Type of image for destination
+    size_t               destImageSize;  ///< Full size of the image for destination
+    uint32_t             destImageCrc32; ///< CRC32 of the image for destination
+    pa_patch_ImageDesc_t destImageDesc;  ///< Device description for destination
 }
 pa_patch_Context_t;
 
@@ -96,6 +98,7 @@ typedef void *pa_patch_Desc_t;
  * @return
  *      - LE_OK            On success
  *      - LE_BAD_PARAMETER If desc is NULL or if mode is not correct
+ *      - LE_OUT_OF_RANGE  The segment size is not compatible with the flash
  *      - LE_FAULT         On failure
  *      - LE_UNSUPPORTED   If the flash device cannot be opened
  *      - others           Depending of the image type and PA device used

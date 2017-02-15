@@ -840,13 +840,6 @@ static le_result_t ApplyPatch
         return LE_NOT_PERMITTED;
     }
 
-    if ((hdrPtr->imageType == CWE_IMAGE_TYPE_QRPM) ||
-        (hdrPtr->imageType == CWE_IMAGE_TYPE_TZON))
-    {
-        LE_ERROR("Patch on TZ and RPM is not supported");
-        return LE_UNSUPPORTED;
-    }
-
     LE_DEBUG( "InPatch %d, len %d, offset %d\n", InPatch, *lengthPtr, offset );
     mtdOrigNum = GetMtdFromImageType( hdrPtr->imageType, 0,
                                       &MtdNamePtr, &isOrigLogical, &isOrigDual );
@@ -1023,10 +1016,14 @@ static le_result_t ApplyPatch
             ctx.origImageCrc32 = PatchMetaHdr.origCrc32;
             ctx.origImageDesc.flash.mtdNum = mtdOrigNum;
             ctx.origImageDesc.flash.ubiVolId = PatchMetaHdr.ubiVolId;
+            ctx.origImageDesc.flash.isLogical = isOrigLogical;
+            ctx.origImageDesc.flash.isDual = isOrigDual;
             ctx.destImageSize = PatchMetaHdr.destSize;
             ctx.destImageCrc32 = PatchMetaHdr.destCrc32;
             ctx.destImageDesc.flash.mtdNum = mtdDestNum;
             ctx.destImageDesc.flash.ubiVolId = PatchMetaHdr.ubiVolId;
+            ctx.destImageDesc.flash.isLogical = isDestLogical;
+            ctx.destImageDesc.flash.isDual = isDestDual;
 
             res = bsPatch( &ctx,
                            "/tmp/.tmp.patch",
@@ -1640,9 +1637,9 @@ static le_result_t WriteData
         ImageSize = hdrPtr->imageSize;
     }
 
-    if( ((uint32_t)(*lengthPtr + InOffset)) > FlashInfoPtr->eraseSize )
+    if( ((uint32_t)(*lengthPtr + InOffset)) >= FlashInfoPtr->eraseSize )
     {
-        memcpy( DataPtr, dataPtr, FlashInfoPtr->eraseSize - InOffset );
+        memcpy( DataPtr + InOffset, dataPtr, FlashInfoPtr->eraseSize - InOffset );
         if( LE_OK != pa_flash_Write( MtdFd, DataPtr, FlashInfoPtr->eraseSize ) )
         {
             LE_ERROR( "fwrite to nandwrite fails: %m\n" );
@@ -1652,8 +1649,8 @@ static le_result_t WriteData
         {
             *isFlashed = true;
         }
-        memcpy( DataPtr, dataPtr, *lengthPtr - (FlashInfoPtr->eraseSize - InOffset) );
         InOffset = *lengthPtr - (FlashInfoPtr->eraseSize - InOffset);
+        memcpy( DataPtr, dataPtr, InOffset );
     }
     else
     {

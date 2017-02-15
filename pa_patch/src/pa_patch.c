@@ -50,6 +50,7 @@ le_mem_PoolRef_t PatchSegmentPool = NULL;
  * @return
  *      - LE_OK            On success
  *      - LE_BAD_PAREMETER If desc is NULL or if mode is not correct
+ *      - LE_OUT_OF_RANGE  The segment size is not compatible with the flash
  *      - LE_FAULT         On failure
  *      - LE_UNSUPPORTED   If the flash device cannot be opened
  */
@@ -104,7 +105,23 @@ le_result_t pa_patch_Open
     {
         case PA_PATCH_IMAGE_RAWFLASH:
              origMode |= (PA_FLASH_OPENMODE_READONLY|PA_FLASH_OPENMODE_MARKBAD);
+             if( descPtr->context.origImageDesc.flash.isLogical )
+             {
+                 origMode |= PA_FLASH_OPENMODE_LOGICAL;
+                 if( descPtr->context.origImageDesc.flash.isDual )
+                 {
+                     origMode |= PA_FLASH_OPENMODE_LOGICAL_DUAL;
+                 }
+             }
              destMode |= (PA_FLASH_OPENMODE_READWRITE|PA_FLASH_OPENMODE_MARKBAD);
+             if( descPtr->context.destImageDesc.flash.isLogical )
+             {
+                 destMode |= PA_FLASH_OPENMODE_LOGICAL;
+                 if( descPtr->context.destImageDesc.flash.isDual )
+                 {
+                     destMode |= PA_FLASH_OPENMODE_LOGICAL_DUAL;
+                 }
+             }
              res = pa_flash_Open( descPtr->context.origImageDesc.flash.mtdNum,
                                          origMode,
                                          &(descPtr->flashOrigDesc),
@@ -160,6 +177,13 @@ le_result_t pa_patch_Open
              destMode |= PA_FLASH_OPENMODE_UBI;
              origMode |= (PA_FLASH_OPENMODE_READONLY|PA_FLASH_OPENMODE_MARKBAD);
              destMode |= (PA_FLASH_OPENMODE_READWRITE|PA_FLASH_OPENMODE_MARKBAD);
+             if( (descPtr->context.origImageDesc.flash.isLogical) ||
+                 (descPtr->context.destImageDesc.flash.isLogical) )
+             {
+                 LE_ERROR("Logical partitions not supported for UBI images");
+                 res = LE_UNSUPPORTED;
+                 goto erroropen;
+             }
              res = pa_flash_Open( descPtr->context.origImageDesc.flash.mtdNum,
                                          origMode,
                                          &(descPtr->flashOrigDesc),
