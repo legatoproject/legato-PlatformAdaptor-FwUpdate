@@ -27,10 +27,14 @@
 // Should avoid to put SBL outside this
 #define SBL_MAX_BASE_IN_FIRST_2MB  (2*1024*1024)
 
-// Timeout for select(): Set to 30s to give time for connection through socket
-#define SET_SELECT_TIMEOUT( tv ) \
+// Default timeout
+#define DEFAULT_TIMEOUT     900
+
+// Timeout for select(): Set to timeout in seconds to give time for connection
+// through fd
+#define SET_SELECT_TIMEOUT(tv, timeout) \
         do { \
-            (tv)->tv_sec = 30; \
+            (tv)->tv_sec = timeout; \
             (tv)->tv_usec = 0; \
         } while (0)
 
@@ -2162,7 +2166,7 @@ size_t pa_fwupdate_ImageData
  *      - LE_BAD_PARAMETER The parameter is invalid (needs to be positive)
  *      - LE_TERMINATED    The download was aborted by the user (by calling
  *                          pa_fwupdate_ExecuteCommand( pa_fwupdate_CANCEL )
- *      - LE_TIMEOUT       The download fails after 30 seconds without data recieved
+ *      - LE_TIMEOUT       The download fails after 900 seconds without data recieved
  *      - LE_FAULT         The function failed
  */
 //--------------------------------------------------------------------------------------------------
@@ -2236,7 +2240,7 @@ le_result_t pa_fwupdate_Download
                         {
                             FD_ZERO(&fdSetRead);
                             FD_SET(fd, &fdSetRead);
-                            SET_SELECT_TIMEOUT( &timeRead );
+                            SET_SELECT_TIMEOUT(&timeRead, DEFAULT_TIMEOUT);
                             if (0 == (rc = select( fd + 1, &fdSetRead, NULL, NULL, &timeRead)))
                             {
                                 LE_CRIT("Timeout on reception. Aborting");
@@ -2272,7 +2276,7 @@ le_result_t pa_fwupdate_Download
                             {
                                 FD_ZERO(&fdSetRead);
                                 FD_SET(fd, &fdSetRead);
-                                SET_SELECT_TIMEOUT( &timeRead );
+                                SET_SELECT_TIMEOUT(&timeRead, DEFAULT_TIMEOUT);
                                 if (0 == (rc = select( fd + 1, &fdSetRead, NULL, NULL, &timeRead)))
                                 {
                                     LE_CRIT("Timeout on reception. Aborting");
