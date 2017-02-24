@@ -1,7 +1,7 @@
 /**
  * @file pa_fwupdate_local.h
  *
- * Copyright (C) Sierra Wireless Inc. Use of this work is subject to license.
+ * Copyright (C) Sierra Wireless Inc.
  *
  */
 
@@ -83,15 +83,19 @@ typedef struct
 }
 pa_fwupdate_CweHeader_t;
 
-/* Misc Options Field Bit Map */
-#define MISC_OPTS_COMPRESS 0x01  /* image following header is compressed */
-#define MISC_OPTS_ENCRYPT  0x02  /* image following header is encrypyted */
-#define MISC_OPTS_SIGNED   0x04  /* image following header is signed */
-#define MISC_OPTS_UNUSED4  0x08
-#define MISC_OPTS_UNUSED3  0x10
-#define MISC_OPTS_UNUSED2  0x20
-#define MISC_OPTS_UNUSED1  0x40
-#define MISC_OPTS_UNUSED0  0x80
+//--------------------------------------------------------------------------------------------------
+/**
+ * Misc Options Field Bit Map
+ */
+//--------------------------------------------------------------------------------------------------
+#define MISC_OPTS_COMPRESS        0x01  ///< image following header is compressed
+#define MISC_OPTS_ENCRYPT         0x02  ///< image following header is encrypyted
+#define MISC_OPTS_SIGNED          0x04  ///< image following header is signed
+#define MISC_OPTS_DELTAPATCH      0x08  ///< image following header is a delta patch
+#define MISC_OPTS_UNUSED3         0x10
+#define MISC_OPTS_UNUSED2         0x20
+#define MISC_OPTS_UNUSED1         0x40
+#define MISC_OPTS_UNUSED0         0x80
 
 //--------------------------------------------------------------------------------------------------
 /**
@@ -157,10 +161,44 @@ pa_fwupdate_ImageType_t;
 
 //--------------------------------------------------------------------------------------------------
 /**
- * Initial value for CRC32 calculation
+ * Delta patch DIFF magic signature
  */
 //--------------------------------------------------------------------------------------------------
-#define START_CRC32         ((uint32_t)0xFFFFFFFF)
+#define DIFF_MAGIC   "BSDIFF40\0\0\0\0\0\0\0\0"
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Delta patch Meta header (one for each image. May be splitted into several slices)
+ * Note: Use uint32_t type for all 32-bits fields
+ */
+//--------------------------------------------------------------------------------------------------
+typedef struct
+{
+  uint8_t  diffType[16];    ///< Patch diff magic signature
+  uint32_t segmentSize;     ///< Segment size for every slices. May be device dependant
+  uint32_t numPatches;      ///< Number of patch slices
+  uint32_t ubiVolId;        ///< UBI Vol Id. Set to -1 if not used.
+  uint32_t origSize;        ///< Size of the original image
+  uint32_t origCrc32;       ///< CRC32 of the original image
+  uint32_t destSize;        ///< Size of the destination image (after patch is applied)
+  uint32_t destCrc32;       ///< CRC32 of the destination image (after patch is applied)
+
+}
+pa_fwupdate_PatchMetaHdr_t;
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Delta patch slice header (one per slice)
+ * Note: Use uint32_t type for all 32-bits fields
+ */
+//--------------------------------------------------------------------------------------------------
+typedef struct
+{
+  uint32_t offset;          ///< Offset of the patch slice into the destination image
+  uint32_t number;          ///< Current number of the patch slice
+  uint32_t size;            ///< Size of the patch slice
+}
+pa_fwupdate_PatchHdr_t;
 
 //--------------------------------------------------------------------------------------------------
 /**
@@ -233,7 +271,6 @@ LE_SHARED le_result_t pa_fwupdate_GetInitialSubSystemId
 (
     uint8_t *initialSSId ///< [OUT] if LE_OK, the current boot system
 );
-
 
 #endif /* LEGATO_LESWUPDATELOCAL_INCLUDE_GUARD */
 

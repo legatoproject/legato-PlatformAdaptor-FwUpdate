@@ -1,7 +1,7 @@
 /**
  * @file pa_flash.h
  *
- * Copyright (C) Sierra Wireless Inc. Use of this work is subject to license.
+ * Copyright (C) Sierra Wireless Inc.
  *
  */
 
@@ -26,7 +26,7 @@
 //
 
 // PEB (physical erase block) and LEB (logical erase block)
-// PEB are physical block inside a flash partition. The first is 0 and the last is N
+// PEB are physical blocks inside a flash partition. The first is 0 and the last is N
 // if a partition stands with N+1 erase blocks.
 // LEB are referencing PEB in a "continous" order, even if PEB are not is the sorted
 // order, or if there are between bad blocks. For example, a partition with 8 PEB
@@ -74,6 +74,13 @@ typedef unsigned int pa_flash_OpenMode_t;
 
 //--------------------------------------------------------------------------------------------------
 /**
+ * Maximum number of volume ID (from 0 to 127)
+ */
+//--------------------------------------------------------------------------------------------------
+#define PA_FLASH_UBI_MAX_VOLUMES  128
+
+//--------------------------------------------------------------------------------------------------
+/**
  * Define the maximum number of LEB (Logical Erase Block)
  */
 //--------------------------------------------------------------------------------------------------
@@ -116,7 +123,7 @@ pa_flash_Info_t;
  */
 //--------------------------------------------------------------------------------------------------
 // Opaque structure for internal usage
-typedef void * pa_flash_Desc_t;
+typedef void* pa_flash_Desc_t;
 
 //--------------------------------------------------------------------------------------------------
 /**
@@ -130,7 +137,7 @@ typedef void * pa_flash_Desc_t;
  *
  * @return
  *      - LE_OK            On success
- *      - LE_BAD_PAREMETER If infoPtr is NULL
+ *      - LE_BAD_PARAMETER If infoPtr is NULL
  *      - LE_FAULT         On failure
  *      - LE_UNSUPPORTED   If the flash device informations cannot be read
  */
@@ -145,11 +152,26 @@ le_result_t pa_flash_GetInfo
 
 //--------------------------------------------------------------------------------------------------
 /**
+ * Retrieve flash information of opening a flash device
+ *
+ * @return
+ *      - LE_OK            On success
+ *      - LE_BAD_PARAMETER If desc is NULL or not a valid flash descriptor or infoPtr is NULL
+ */
+//--------------------------------------------------------------------------------------------------
+le_result_t pa_flash_RetrieveInfo
+(
+    pa_flash_Desc_t desc,     ///< [IN] Private flash descriptor
+    pa_flash_Info_t **infoPtr ///< [IN] Pointer to copy the flash information
+);
+
+//--------------------------------------------------------------------------------------------------
+/**
  * Open a flash device for the given operation and return a descriptor
  *
  * @return
  *      - LE_OK            On success
- *      - LE_BAD_PAREMETER If desc is NULL or if mode is not correct
+ *      - LE_BAD_PARAMETER If desc is NULL or if mode is not correct
  *      - LE_FAULT         On failure
  *      - LE_UNSUPPORTED   If the flash device cannot be opened
  */
@@ -158,7 +180,7 @@ le_result_t pa_flash_Open
 (
     int partNum,              ///< [IN] Partition number
     pa_flash_OpenMode_t mode, ///< [IN] Open mode for this flash partition
-    pa_flash_Desc_t *desc,    ///< [OUT] Private flash descriptor
+    pa_flash_Desc_t *descPtr, ///< [OUT] Private flash descriptor
     pa_flash_Info_t **infoPtr ///< [OUT] Pointer to the flash information (may be NULL)
 );
 
@@ -168,7 +190,7 @@ le_result_t pa_flash_Open
  *
  * @return
  *      - LE_OK            On success
- *      - LE_BAD_PAREMETER If desc is NULL or not a valid flash descriptor
+ *      - LE_BAD_PARAMETER If desc is NULL or not a valid flash descriptor
  */
 //--------------------------------------------------------------------------------------------------
 le_result_t pa_flash_Close
@@ -184,7 +206,7 @@ le_result_t pa_flash_Close
  *
  * @return
  *      - LE_OK            On success
- *      - LE_BAD_PAREMETER If desc is NULL
+ *      - LE_BAD_PARAMETER If desc is NULL
  *      - LE_FAULT         On failure
  *      - LE_OUT_OF_RANGE  If the partition is too big to fit in LebToPeb array
  *      - LE_IO_ERROR      If a flash IO error occurs
@@ -204,7 +226,7 @@ le_result_t pa_flash_Scan
  *
  * @return
  *      - LE_OK            On success
- *      - LE_BAD_PAREMETER If desc is NULL
+ *      - LE_BAD_PARAMETER If desc is NULL
  */
 //--------------------------------------------------------------------------------------------------
 le_result_t pa_flash_Unscan
@@ -218,7 +240,7 @@ le_result_t pa_flash_Unscan
  *
  * @return
  *      - LE_OK            On success
- *      - LE_BAD_PAREMETER If desc is NULL or isBadBlockPtr is NULL
+ *      - LE_BAD_PARAMETER If desc is NULL or isBadBlockPtr is NULL
  *      - LE_FAULT         On failure
  *      - LE_OUT_OF_RANGE  If the block is outside the partition
  *      - LE_NOT_PERMITTED If the LEB is not linked to a PEB
@@ -238,7 +260,7 @@ le_result_t pa_flash_CheckBadBlock
  *
  * @return
  *      - LE_OK            On success
- *      - LE_BAD_PAREMETER If desc is NULL
+ *      - LE_BAD_PARAMETER If desc is NULL
  *      - LE_FAULT         On failure
  *      - LE_OUT_OF_RANGE  If the block is outside the partition
  *      - LE_NOT_PERMITTED If the LEB is not linked to a PEB
@@ -257,7 +279,7 @@ le_result_t pa_flash_MarkBadBlock
  *
  * @return
  *      - LE_OK            On success
- *      - LE_BAD_PAREMETER If desc is NULL
+ *      - LE_BAD_PARAMETER If desc is NULL
  *      - LE_FAULT         On failure
  *      - LE_OUT_OF_RANGE  If the block is outside the partition
  *      - LE_NOT_PERMITTED If the LEB is not linked to a PEB
@@ -276,7 +298,7 @@ le_result_t pa_flash_EraseBlock
  *
  * @return
  *      - LE_OK            On success
- *      - LE_BAD_PAREMETER If desc is NULL
+ *      - LE_BAD_PARAMETER If desc is NULL
  *      - LE_FAULT         On failure
  *      - LE_OUT_OF_RANGE  If the block is outside the partition
  *      - LE_NOT_PERMITTED If the LEB is not linked to a PEB
@@ -295,7 +317,7 @@ le_result_t pa_flash_SeekAtOffset
  *
  * @return
  *      - LE_OK            On success
- *      - LE_BAD_PAREMETER If desc is NULL
+ *      - LE_BAD_PARAMETER If desc is NULL
  *      - LE_FAULT         On failure
  *      - LE_OUT_OF_RANGE  If the block is outside the partition
  *      - LE_NOT_PERMITTED If the LEB is not linked to a PEB
@@ -316,7 +338,7 @@ le_result_t pa_flash_SeekAtBlock
  *
  * @return
  *      - LE_OK            On success
- *      - LE_BAD_PAREMETER If desc is NULL or dataPtr is NULL
+ *      - LE_BAD_PARAMETER If desc is NULL or dataPtr is NULL
  *      - LE_FAULT         On failure
  *      - LE_OUT_OF_RANGE  If the block is outside the partition
  *      - LE_NOT_PERMITTED If the LEB is not linked to a PEB
@@ -339,7 +361,7 @@ le_result_t pa_flash_Read
  *
  * @return
  *      - LE_OK            On success
- *      - LE_BAD_PAREMETER If desc is NULL or dataPtr is NULL
+ *      - LE_BAD_PARAMETER If desc is NULL or dataPtr is NULL
  *      - LE_FAULT         On failure
  *      - LE_OUT_OF_RANGE  If the block is outside the partition
  *      - LE_NOT_PERMITTED If the LEB is not linked to a PEB
@@ -361,7 +383,7 @@ le_result_t pa_flash_Write
  *
  * @return
  *      - LE_OK            On success
- *      - LE_BAD_PAREMETER If desc is NULL or dataPtr is NULL
+ *      - LE_BAD_PARAMETER If desc is NULL or dataPtr is NULL
  *      - LE_FAULT         On failure
  *      - LE_OUT_OF_RANGE  If the block is outside the partition
  *      - LE_NOT_PERMITTED If the LEB is not linked to a PEB
@@ -385,7 +407,7 @@ le_result_t pa_flash_ReadAtBlock
  *
  * @return
  *      - LE_OK            On success
- *      - LE_BAD_PAREMETER If desc is NULL or dataPtr is NULL
+ *      - LE_BAD_PARAMETER If desc is NULL or dataPtr is NULL
  *      - LE_FAULT         On failure
  *      - LE_OUT_OF_RANGE  If the block is outside the partition
  *      - LE_NOT_PERMITTED If the LEB is not linked to a PEB
@@ -398,6 +420,109 @@ le_result_t pa_flash_WriteAtBlock
     uint32_t blockIndex,      ///< [IN] PEB or LEB to write
     uint8_t *dataPtr,         ///< [IN] Pointer to data to be written
     size_t dataSize           ///< [IN] Size of data to write
+);
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Scan a partition for the UBI volume ID given. Update the LebToPeb array field with LEB for this
+ * volume ID.
+ *
+ * @return
+ *      - LE_OK            On success
+ *      - LE_BAD_PARAMETER If desc is NULL or is not a valid descriptor
+ *      - LE_FAULT         On failure
+ *      - LE_OUT_OF_RANGE  If the UBI volume ID is over its permitted values
+ *      - LE_IO_ERROR      If a flash IO error occurs
+ *      - LE_FORMAT_ERROR  If the flash is not in UBI format
+ */
+//--------------------------------------------------------------------------------------------------
+le_result_t pa_flash_ScanUbi
+(
+    pa_flash_Desc_t desc,     ///< [IN] Private flash descriptor
+    uint32_t ubiVolId         ///< [IN] UBI volume ID
+);
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Clear the scanned list of an UBI volume ID and reset all LEB to PEB
+ * After called, the functions "work" with PEB
+ *
+ * @return
+ *      - LE_OK            On success
+ *      - LE_BAD_PARAMETER If desc is NULL or is not a valid descriptor
+ *      - LE_FORMAT_ERROR  If the flash is not in UBI format
+ */
+//--------------------------------------------------------------------------------------------------
+le_result_t pa_flash_UnscanUbi
+(
+    pa_flash_Desc_t desc      ///< [IN] Private flash descriptor
+);
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Read data from an UBI volume starting the given block. If a Bad block is detected,
+ * the error LE_IO_ERROR is returned and operation is aborted.
+ *
+ * @return
+ *      - LE_OK            On success
+ *      - LE_BAD_PARAMETER If desc is NULL or dataPtr or dataSizePtr is NULL
+ *      - LE_FAULT         On failure
+ *      - LE_OUT_OF_RANGE  If the block is outside the partition
+ *      - LE_NOT_PERMITTED If the LEB is not linked to a PEB
+ *      - LE_IO_ERROR      If a flash IO error occurs
+ *      - LE_FORMAT_ERROR  If the flash is not in UBI format
+ */
+//--------------------------------------------------------------------------------------------------
+le_result_t pa_flash_ReadUbiAtBlock
+(
+    pa_flash_Desc_t desc,     ///< [IN] Private flash descriptor
+    uint32_t leb,             ///< [IN] LEB to read
+    uint8_t *dataPtr,         ///< [IN] Pointer to data to be read
+    size_t *dataSizePtr       ///< [IN][OUT] Pointer to size to read
+);
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Write data to an UBI volume starting the given block. If a Bad block is detected,
+ * the error LE_IO_ERROR is returned and operation is aborted.
+ * Note that the length should be a multiple of writeSize
+ *
+ * @return
+ *      - LE_OK            On success
+ *      - LE_BAD_PARAMETER If desc is NULL or dataPtr is NULL
+ *      - LE_FAULT         On failure
+ *      - LE_OUT_OF_RANGE  If the block is outside the partition or no block free to extend
+ *      - LE_NOT_PERMITTED If the LEB is not linked to a PEB
+ *      - LE_IO_ERROR      If a flash IO error occurs
+ *      - LE_FORMAT_ERROR  If the flash is not in UBI format
+ */
+//--------------------------------------------------------------------------------------------------
+le_result_t pa_flash_WriteUbiAtBlock
+(
+    pa_flash_Desc_t desc,     ///< [IN] Private flash descriptor
+    uint32_t leb,             ///< [IN] LEB to write
+    uint8_t *dataPtr,         ///< [IN] Pointer to data to be written
+    size_t dataSize,          ///< [IN][OUT] Size to be written
+    bool extendUbiVolume      ///< [IN] True if the volume may be extended by one block if write
+                              ///<      is the leb is outside the current volume
+);
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Adjust (reduce) the UBI volume size to the given size.
+ *
+ * @return
+ *      - LE_OK            On success
+ *      - LE_BAD_PARAMETER If desc is NULL or is not a valid descriptor
+ *      - LE_FAULT         On failure
+ *      - LE_IO_ERROR      If a flash IO error occurs
+ *      - LE_FORMAT_ERROR  If the flash is not in UBI format
+ */
+//--------------------------------------------------------------------------------------------------
+le_result_t pa_flash_AdjustUbiSize
+(
+    pa_flash_Desc_t desc,     ///< [IN] Private flash descriptor
+    size_t newSize            ///< [IN] Final size of the UBI volume
 );
 
 #endif // LEGATO_PA_FLASH_INCLUDE_GUARD

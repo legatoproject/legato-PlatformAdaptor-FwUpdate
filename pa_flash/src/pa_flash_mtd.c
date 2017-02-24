@@ -1,14 +1,15 @@
 /**
  * @file pa_flash_mtd.c
  *
- * implementation of low level flash access
+ * Implementation of low level flash access
  *
- * Copyright (C) Sierra Wireless Inc. Use of this work is subject to license.
+ * Copyright (C) Sierra Wireless Inc.
  *
  */
 
 #include "legato.h"
 #include "pa_flash.h"
+#include "pa_flash_local.h"
 #include "interfaces.h"
 #include <mtd/mtd-user.h>
 
@@ -41,23 +42,6 @@
  */
 //--------------------------------------------------------------------------------------------------
 #define PA_FLASH_DEVICE_LENGTH (4 + 4 + 3 + 1)
-
-//--------------------------------------------------------------------------------------------------
-/**
- * Internal flash MTD descriptor. To be valid, the magic should be its own address
- */
-//--------------------------------------------------------------------------------------------------
-typedef struct
-{
-    pa_flash_Desc_t magic;   // itself for checking validity
-    int mtdNum;              // MTD number open
-    int fd;                  // File descriptor for MTD access
-    pa_flash_Info_t mtdInfo; // MTD information
-    bool scanDone;           // The scan is done, use LEB translation for PEB access
-    bool markBad;            // Mark bad block and use next to read/write...
-    uint32_t lebToPeb[PA_FLASH_MAX_LEB]; // LEB to PEB translation array (if scanDone)
-}
-pa_flash_MtdDesc_t;
 
 //--------------------------------------------------------------------------------------------------
 /**
@@ -157,7 +141,7 @@ static le_result_t GetBlock
  *
  * @return
  *      - LE_OK            On success
- *      - LE_BAD_PAREMETER If infoPtr is NULL
+ *      - LE_BAD_PARAMETER If infoPtr is NULL
  *      - LE_UNSUPPORTED   If the flash informations cannot be read
  */
 //--------------------------------------------------------------------------------------------------
@@ -237,11 +221,37 @@ le_result_t pa_flash_GetInfo
 
 //--------------------------------------------------------------------------------------------------
 /**
+ * Retrieve flash information of opening a flash device
+ *
+ * @return
+ *      - LE_OK            On success
+ *      - LE_BAD_PARAMETER If desc is NULL or not a valid flash descriptor or infoPtr is NULL
+ */
+//--------------------------------------------------------------------------------------------------
+le_result_t pa_flash_RetrieveInfo
+(
+    pa_flash_Desc_t desc,     ///< [IN] Private flash descriptor
+    pa_flash_Info_t **infoPtr ///< [IN] Pointer to copy the flash information
+)
+{
+    pa_flash_MtdDesc_t *descPtr = (pa_flash_MtdDesc_t *)desc;
+
+    if( (!descPtr) || (descPtr->magic != desc) || (!infoPtr) )
+    {
+        return LE_BAD_PARAMETER;
+    }
+
+    *infoPtr = &(descPtr->mtdInfo);
+    return LE_OK;
+}
+
+//--------------------------------------------------------------------------------------------------
+/**
  * Open a flash for the given operation and return a descriptor
  *
  * @return
  *      - LE_OK            On success
- *      - LE_BAD_PAREMETER If desc is NULL or if mode is not correct
+ *      - LE_BAD_PARAMETER If desc is NULL or if mode is not correct
  *      - LE_FAULT         On failure
  *      - LE_UNSUPPORTED   If the flash device cannot be opened
  */
@@ -250,12 +260,12 @@ le_result_t pa_flash_Open
 (
     int mtdNum,
     pa_flash_OpenMode_t mode,
-    pa_flash_Desc_t *desc,
+    pa_flash_Desc_t *descPtr,
     pa_flash_Info_t **infoPtr
 )
 {
     char mtd[PA_FLASH_DEVICE_LENGTH];
-    pa_flash_MtdDesc_t *descPtr;
+    pa_flash_MtdDesc_t *mtdDescPtr;
     int omode, fd;
     le_result_t rc;
     bool isLogical = (mode & PA_FLASH_OPENMODE_LOGICAL) ? true : false;
@@ -263,7 +273,7 @@ le_result_t pa_flash_Open
     bool isUbi = (mode & PA_FLASH_OPENMODE_UBI) ? true : false;
     bool markBad = (mode & PA_FLASH_OPENMODE_MARKBAD) ? true : false;
 
-    if( !desc )
+    if( !descPtr )
     {
         return LE_BAD_PARAMETER;
     }
@@ -296,7 +306,7 @@ le_result_t pa_flash_Open
         LE_ERROR("Open of MTD %d fails: %m\n", mtdNum);
         return LE_UNSUPPORTED;
     }
-    if( FlashMtdDescPool == NULL )
+    if( NULL == FlashMtdDescPool )
     {
         // Allocate the pool for MTD descriptors
         FlashMtdDescPool = le_mem_CreatePool("FlashMtdDescPool",
@@ -304,31 +314,31 @@ le_result_t pa_flash_Open
         le_mem_ExpandPool(FlashMtdDescPool, 2);
     }
     // Allocate and fill the MTD descriptor
-    descPtr = (pa_flash_MtdDesc_t*)le_mem_ForceAlloc(FlashMtdDescPool);
-    descPtr->fd = fd;
-    descPtr->mtdNum = mtdNum;
-    descPtr->scanDone = false;
-    descPtr->markBad = markBad;
-    rc = pa_flash_GetInfo( mtdNum, &(descPtr->mtdInfo), isLogical, isDual );
+    mtdDescPtr = (pa_flash_MtdDesc_t*)le_mem_ForceAlloc(FlashMtdDescPool);
+    mtdDescPtr->fd = fd;
+    mtdDescPtr->mtdNum = mtdNum;
+    mtdDescPtr->scanDone = false;
+    mtdDescPtr->markBad = markBad;
+    rc = pa_flash_GetInfo( mtdNum, &(mtdDescPtr->mtdInfo), isLogical, isDual );
     if( LE_OK != rc )
     {
-        close(descPtr->fd);
-        le_mem_Release(descPtr);
+        close(mtdDescPtr->fd);
+        le_mem_Release(mtdDescPtr);
         return rc;
     }
 
-    descPtr->mtdInfo.ubi = isUbi;
+    mtdDescPtr->mtdInfo.ubi = isUbi;
     // Clear the LEB to PEB array
-    memset( &(descPtr->lebToPeb), -1, sizeof(descPtr->lebToPeb));
+    memset( &(mtdDescPtr->lebToPeb), -1, sizeof(mtdDescPtr->lebToPeb));
 
     if( infoPtr )
     {
-        *infoPtr = &(descPtr->mtdInfo);
+        *infoPtr = &(mtdDescPtr->mtdInfo);
     }
 
     // Validate the MTD descriptor
-    descPtr->magic = (pa_flash_Desc_t)descPtr;
-    *desc = (pa_flash_Desc_t)descPtr;
+    mtdDescPtr->magic = (pa_flash_Desc_t)mtdDescPtr;
+    *descPtr = (pa_flash_Desc_t)mtdDescPtr;
 
     return LE_OK;
 }
@@ -339,7 +349,7 @@ le_result_t pa_flash_Open
  *
  * @return
  *      - LE_OK            On success
- *      - LE_BAD_PAREMETER If desc is NULL or not a valid flash descriptor
+ *      - LE_BAD_PARAMETER If desc is NULL or not a valid flash descriptor
  */
 //--------------------------------------------------------------------------------------------------
 le_result_t pa_flash_Close
@@ -369,7 +379,7 @@ le_result_t pa_flash_Close
  *
  * @return
  *      - LE_OK            On success
- *      - LE_BAD_PAREMETER If desc is NULL
+ *      - LE_BAD_PARAMETER If desc is NULL
  *      - LE_FAULT         On failure
  *      - LE_OUT_OF_RANGE  If the partition is too big to fit in LebToPeb array
  *      - LE_NOT_PERMITTED If the LEB is not linked to a PEB
@@ -451,7 +461,7 @@ le_result_t pa_flash_Scan
  *
  * @return
  *      - LE_OK            On success
- *      - LE_BAD_PAREMETER If desc is NULL
+ *      - LE_BAD_PARAMETER If desc is NULL
  */
 //--------------------------------------------------------------------------------------------------
 le_result_t pa_flash_Unscan
@@ -483,7 +493,7 @@ le_result_t pa_flash_Unscan
  *
  * @return
  *      - LE_OK            On success
- *      - LE_BAD_PAREMETER If desc is NULL
+ *      - LE_BAD_PARAMETER If desc is NULL
  *      - LE_FAULT         On failure
  *      - LE_OUT_OF_RANGE  If the block is outside the partition
  *      - LE_NOT_PERMITTED If the LEB is not linked to a PEB
@@ -544,7 +554,7 @@ le_result_t pa_flash_CheckBadBlock
  *
  * @return
  *      - LE_OK            On success
- *      - LE_BAD_PAREMETER If desc is NULL
+ *      - LE_BAD_PARAMETER If desc is NULL
  *      - LE_FAULT         On failure
  *      - LE_OUT_OF_RANGE  If the block is outside the partition
  *      - LE_NOT_PERMITTED If the LEB is not linked to a PEB
@@ -601,7 +611,7 @@ le_result_t pa_flash_MarkBadBlock
  *
  * @return
  *      - LE_OK            On success
- *      - LE_BAD_PAREMETER If desc is NULL
+ *      - LE_BAD_PARAMETER If desc is NULL
  *      - LE_FAULT         On failure
  *      - LE_OUT_OF_RANGE  If the block is outside the partition
  *      - LE_NOT_PERMITTED If the LEB is not linked to a PEB
@@ -682,7 +692,7 @@ le_result_t pa_flash_EraseBlock
  *
  * @return
  *      - LE_OK            On success
- *      - LE_BAD_PAREMETER If desc is NULL
+ *      - LE_BAD_PARAMETER If desc is NULL
  *      - LE_FAULT         On failure
  *      - LE_OUT_OF_RANGE  If the block is outside the partition
  *      - LE_NOT_PERMITTED If the LEB is not linked to a PEB
@@ -745,7 +755,7 @@ le_result_t pa_flash_SeekAtOffset
  *
  * @return
  *      - LE_OK            On success
- *      - LE_BAD_PAREMETER If desc is NULL
+ *      - LE_BAD_PARAMETER If desc is NULL
  *      - LE_FAULT         On failure
  *      - LE_OUT_OF_RANGE  If the block is outside the partition
  *      - LE_NOT_PERMITTED If the LEB is not linked to a PEB
@@ -804,7 +814,7 @@ le_result_t pa_flash_SeekAtBlock
  *
  * @return
  *      - LE_OK            On success
- *      - LE_BAD_PAREMETER If desc is NULL or dataPtr is NULL
+ *      - LE_BAD_PARAMETER If desc is NULL or dataPtr is NULL
  *      - LE_FAULT         On failure
  *      - LE_OUT_OF_RANGE  If the block is outside the partition
  *      - LE_NOT_PERMITTED If the LEB is not linked to a PEB
@@ -864,7 +874,7 @@ le_result_t pa_flash_Read
  *
  * @return
  *      - LE_OK            On success
- *      - LE_BAD_PAREMETER If desc is NULL or dataPtr is NULL
+ *      - LE_BAD_PARAMETER If desc is NULL or dataPtr is NULL
  *      - LE_FAULT         On failure
  *      - LE_OUT_OF_RANGE  If the block is outside the partition
  *      - LE_NOT_PERMITTED If the LEB is not linked to a PEB
@@ -937,7 +947,7 @@ le_result_t pa_flash_Write
  *
  * @return
  *      - LE_OK            On success
- *      - LE_BAD_PAREMETER If desc is NULL or dataPtr is NULL
+ *      - LE_BAD_PARAMETER If desc is NULL or dataPtr is NULL
  *      - LE_FAULT         On failure
  *      - LE_OUT_OF_RANGE  If the block is outside the partition
  *      - LE_NOT_PERMITTED If the LEB is not linked to a PEB
@@ -1004,7 +1014,7 @@ le_result_t pa_flash_ReadAtBlock
  *
  * @return
  *      - LE_OK            On success
- *      - LE_BAD_PAREMETER If desc is NULL or dataPtr is NULL
+ *      - LE_BAD_PARAMETER If desc is NULL or dataPtr is NULL
  *      - LE_FAULT         On failure
  *      - LE_OUT_OF_RANGE  If the block is outside the partition
  *      - LE_NOT_PERMITTED If the LEB is not linked to a PEB

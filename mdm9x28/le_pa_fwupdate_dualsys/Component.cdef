@@ -10,11 +10,24 @@ sources:
 {
     ../../mdm9x40/le_pa_fwupdate_dualsys/pa_fwupdate_dualsys.c
     ../../pa_flash/src/pa_flash_mtd.c
+    ../../pa_flash/src/pa_flash_ubi.c
+    ../../pa_patch/src/pa_patch.c
+    $LEGATO_ROOT/3rdParty/bsdiff-4.3/bspatch.c
 }
 
 cflags:
 {
     -DPA_FWUPDATE_PRODUCT_ID=0x39583238
+    -DSIERRA_BSPATCH
     -I$LEGATO_FWUPDATE_PA_DUALSYS/../../pa_flash/inc
+    -I$LEGATO_FWUPDATE_PA_DUALSYS/../../pa_patch/inc
+    -I$LEGATO_FWUPDATE_PA_DUALSYS/../../mdm9x40/le_pa_fwupdate_dualsys/
+    -I$LEGATO_ROOT/3rdParty/bsdiff-4.3
+    -I$LEGATO_ROOT/3rdParty/include
     -I$LEGATO_ROOT/components/fwupdate/platformAdaptor/inc
+}
+
+ldflags:
+{
+    -lbz2
 }

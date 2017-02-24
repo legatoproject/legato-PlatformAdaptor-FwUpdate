@@ -12,12 +12,15 @@
 
 #include "legato.h"
 #include "pa_flash.h"
+#include "pa_patch.h"
+#include "bspatch.h"
 #include "pa_fwupdate.h"
 #include "pa_fwupdate_dualsys.h"
 #include "interfaces.h"
 #include <sys/reboot.h>
 #include <linux/reboot.h>
 #include <sys/select.h>
+#include <netinet/in.h>
 
 
 // SBL number of passes needed to flash low/high and high/low SBL scrub
@@ -291,6 +294,47 @@ static char* pa_fwupdate_PartNamePtr[2][ CWE_IMAGE_TYPE_COUNT ] = {
     },
 };
 
+//--------------------------------------------------------------------------------------------------
+/**
+ * Current patch Meta Header (The CWE contains a patch)
+ */
+//--------------------------------------------------------------------------------------------------
+static pa_fwupdate_PatchMetaHdr_t PatchMetaHdr;
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Current patch Header (a "slice" of the whole patch)
+ */
+//--------------------------------------------------------------------------------------------------
+static pa_fwupdate_PatchHdr_t PatchHdr;
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * State of the patch
+ */
+//--------------------------------------------------------------------------------------------------
+static bool InPatch = false;
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * File descriptor to create the patch file
+ */
+//--------------------------------------------------------------------------------------------------
+static int PatchFd = -1;
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Expected remaining length of the patch when a patch is crossing a chunk
+ */
+//--------------------------------------------------------------------------------------------------
+static int PatchRemLen = 0;
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * In progress CRC32 of the destination when applying a patch
+ */
+//--------------------------------------------------------------------------------------------------
+static uint32_t PatchCrc32;
 
 //--------------------------------------------------------------------------------------------------
 /**
@@ -544,6 +588,32 @@ static int GetMtdFromImageType
 
 //--------------------------------------------------------------------------------------------------
 /**
+ * This function is used to get a 32 bit value from a packet in network byte order, convert it to
+ * host order and increment the packet pointer beyond the extracted field
+ *
+ * @return
+ *      - LE_OK            The request was accepted
+ *      - LE_BAD_PARAMETER The parameter is invalid
+ *      - LE_NOT_POSSIBLE  The action is not compliant with the SW update state (no downloaded pkg)
+ *      - LE_FAULT         If an error occurs
+ */
+//--------------------------------------------------------------------------------------------------
+static uint32_t TranslateNetworkByteOrder
+(
+    uint8_t** packetPtrPtr ///< [IN] memory location of the pointer to the packet from which
+                           ///< the 32 bit value will be read
+)
+{
+    uint32_t* packetPtr = *(uint32_t**)packetPtrPtr;
+    uint32_t field = *packetPtr;
+
+    *packetPtrPtr = ((uint8_t*)packetPtr) + sizeof(field);
+
+    return ntohl(field);
+}
+
+//--------------------------------------------------------------------------------------------------
+/**
  * Check if data flashed into a partition are correctly written
  *
  * @return
@@ -635,6 +705,396 @@ error:
 
 //--------------------------------------------------------------------------------------------------
 /**
+ * Check if data flashed into a an UBI volume ID is correct
+ *
+ * @return
+ *      - LE_OK        on success
+ *      - LE_FAULT     if checksum is not correct
+ *      - others       depending of the UBI functions return
+ */
+//--------------------------------------------------------------------------------------------------
+static le_result_t CheckUbiData
+(
+    int mtdNum,                        ///< [IN] Minor of the MTD device to check
+    uint32_t ubiVolId,                 ///< [IN] UBI Volume ID to check
+    size_t sizeToCheck,                ///< [IN] Size to be used to compute the CRC
+    uint32_t crc32ToCheck              ///< [IN] Expected CRC 32
+)
+{
+    pa_flash_Desc_t desc = NULL;
+    uint8_t* checkBlockPtr = NULL;
+
+    size_t size, imageSize = 0;
+    uint32_t blk, crc32 = LE_CRC_START_CRC32;
+    pa_flash_Info_t *mtdInfoPtr;
+    le_result_t res = LE_FAULT;
+
+    LE_INFO( "MTD %d VolId %d Size=%08x, Crc32=%08x",
+             mtdNum, ubiVolId, sizeToCheck, crc32ToCheck );
+
+    res = pa_flash_Open( mtdNum, PA_FLASH_OPENMODE_READONLY, &desc, &mtdInfoPtr );
+    if (LE_OK != res)
+    {
+        LE_ERROR("Open of MTD %d fails: %d\n", mtdNum, res );
+        goto error;
+    }
+
+    res = pa_flash_ScanUbi( desc, ubiVolId );
+    if (LE_OK != res)
+    {
+        LE_ERROR("Scan of MTD %d UBI volId %u fails: %d\n", mtdNum, ubiVolId, res );
+        goto error;
+    }
+
+    checkBlockPtr = le_mem_ForceAlloc(FlashImgPool);
+    for( blk = 0; imageSize < sizeToCheck; blk++ )
+    {
+        size = (sizeToCheck - imageSize);
+        LE_DEBUG("LEB %d : Read %x", blk, size);
+        res = pa_flash_ReadUbiAtBlock( desc, blk, checkBlockPtr, &size);
+        if (LE_OK != res )
+        {
+            goto error;
+        }
+
+        crc32 = le_crc_Crc32( checkBlockPtr, (uint32_t)size, crc32);
+        imageSize += size;
+    }
+    if (crc32 != crc32ToCheck)
+    {
+        LE_CRIT( "Bad CRC32 calculated on mtd%d: read %08x != expected %08x",
+                 mtdNum, crc32, crc32ToCheck );
+        res = LE_FAULT;
+        goto error;
+    }
+
+    if( !sizeToCheck )
+    {
+        LE_INFO("CRC32 OK for MTD %d VolId %d, crc %X\n", mtdNum, ubiVolId, crc32 );
+    }
+
+    pa_flash_Close( desc );
+    le_mem_Release(checkBlockPtr);
+    return LE_OK;
+
+error:
+    if( desc )
+    {
+        pa_flash_Close( desc );
+    }
+    if( checkBlockPtr )
+    {
+        le_mem_Release(checkBlockPtr);
+    }
+    return res;
+}
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Apply patch to a partition
+ *
+ * @return
+ *      - LE_OK            on success
+ *      - LE_FAULT         on failure
+ *      - LE_NOT_PERMITTED if the patch is applied to the SBL
+ *      - others           depending of the UBI or flash functions return
+ */
+//--------------------------------------------------------------------------------------------------
+static le_result_t ApplyPatch
+(
+    pa_fwupdate_ImageFormat_t format,   ///< [IN] Component image format linked to data
+    pa_fwupdate_CweHeader_t* hdrPtr,    ///< [IN] Component image header
+    size_t* lengthPtr,                  ///< [IN] Input data length
+    size_t offset,                      ///< [IN] Data offset in the package
+    uint8_t* dataPtr,                   ///< [IN] intput data
+    bool forceClose                     ///< [IN] Force close of device and resources
+)
+{
+    int mtdDestNum, mtdOrigNum;
+    size_t inLen, wrLen, inOffset = 0;
+    int remLen = 0;
+    uint8_t *dataToHdrPtr;
+    bool isOrigLogical, isOrigDual, isDestLogical, isDestDual;
+    le_result_t res;
+
+    if( forceClose )
+    {
+        // If forceClose set, close descriptor and release all resources
+        LE_CRIT( "Closing and releasing MTD due to forceClose\n" );
+        goto error;
+    }
+
+    if( (!dataPtr) || (!lengthPtr) )
+    {
+        goto error;
+    }
+
+    inLen = *lengthPtr;
+
+    LE_INFO("Format %d image type %d len %d offset %d (%d)",
+             format, hdrPtr->imageType, *lengthPtr, offset, hdrPtr->imageSize);
+
+    if (hdrPtr->imageType == CWE_IMAGE_TYPE_SBL1)
+    {
+        LE_ERROR("SBL could not be flashed as a patch");
+        return LE_NOT_PERMITTED;
+    }
+
+    if ((hdrPtr->imageType == CWE_IMAGE_TYPE_QRPM) ||
+        (hdrPtr->imageType == CWE_IMAGE_TYPE_TZON))
+    {
+        LE_ERROR("Patch on TZ and RPM is not supported");
+        return LE_UNSUPPORTED;
+    }
+
+    LE_DEBUG( "InPatch %d, len %d, offset %d\n", InPatch, *lengthPtr, offset );
+    mtdOrigNum = GetMtdFromImageType( hdrPtr->imageType, 0,
+                                      &MtdNamePtr, &isOrigLogical, &isOrigDual );
+    mtdDestNum = GetMtdFromImageType( hdrPtr->imageType, 1,
+                                      &MtdNamePtr, &isDestLogical, &isDestDual );
+
+    if( (-1 == mtdDestNum) || (-1 == mtdOrigNum) )
+    {
+        LE_ERROR( "Unable to find a valid mtd for image type %d\n", hdrPtr->imageType );
+        goto error;
+    }
+
+    if( !InPatch )
+    {
+        // No patch in progress. This is a new patch
+        memset( &PatchHdr, 0, sizeof(PatchHdr) );
+        PatchCrc32 = LE_CRC_START_CRC32;
+
+        // Check patch magic
+        if( memcmp( ((pa_fwupdate_PatchMetaHdr_t*)dataPtr)->diffType, DIFF_MAGIC,
+                           sizeof(PatchMetaHdr.diffType)) )
+        {
+            LE_ERROR("Patch type is not correct: %s", ((pa_fwupdate_PatchMetaHdr_t*)dataPtr)->diffType);
+            goto error;
+        }
+        // Copy patch meta header and take care of byte order BIG endian vs LITTLE endian
+        memcpy( &PatchMetaHdr.diffType, dataPtr, sizeof(PatchMetaHdr.diffType) );
+        dataToHdrPtr = (uint8_t*)&(((pa_fwupdate_PatchMetaHdr_t*)dataPtr)->segmentSize);
+        PatchMetaHdr.segmentSize = TranslateNetworkByteOrder( &dataToHdrPtr );
+        PatchMetaHdr.numPatches = TranslateNetworkByteOrder( &dataToHdrPtr );
+        PatchMetaHdr.ubiVolId = TranslateNetworkByteOrder( &dataToHdrPtr );
+        PatchMetaHdr.origSize = TranslateNetworkByteOrder( &dataToHdrPtr );
+        PatchMetaHdr.origCrc32 = TranslateNetworkByteOrder( &dataToHdrPtr );
+        PatchMetaHdr.destSize = TranslateNetworkByteOrder( &dataToHdrPtr );
+        PatchMetaHdr.destCrc32 = TranslateNetworkByteOrder( &dataToHdrPtr );
+
+        LE_INFO("Meta Header: SegSz %X NumPtch %X UbiVolId %X "
+                "OrigSz %X OrigCrc %X DestSz %X DestCrc %X",
+                PatchMetaHdr.segmentSize, PatchMetaHdr.numPatches,
+                PatchMetaHdr.ubiVolId,
+                PatchMetaHdr.origSize, PatchMetaHdr.origCrc32,
+                PatchMetaHdr.destSize, PatchMetaHdr.destCrc32);
+
+        if( PatchMetaHdr.ubiVolId != 0xFFFFFFFFU )
+        {
+            if( LE_OK != CheckUbiData( mtdOrigNum,
+                                       PatchMetaHdr.ubiVolId,
+                                       PatchMetaHdr.origSize,
+                                       PatchMetaHdr.origCrc32 ) )
+            {
+                LE_CRIT("Cannot apply patch. Partition \%s\" is not conform", MtdNamePtr);
+                goto error;
+            }
+            if( LE_OK != CheckUbiData( mtdDestNum,
+                                       PatchMetaHdr.ubiVolId,
+                                       0,
+                                       LE_CRC_START_CRC32 ) )
+            {
+                LE_CRIT("Cannot apply patch. Partition \%s\" is not UBI", MtdNamePtr);
+                goto error;
+            }
+        }
+        else if (LE_OK != CheckData( mtdOrigNum,
+                                     isOrigLogical,
+                                     isOrigDual,
+                                     PatchMetaHdr.origSize,
+                                     0,
+                                     PatchMetaHdr.origCrc32 ))
+        {
+            LE_CRIT("Cannot apply patch. Partition \"%s\" CRC32 does not match",
+                    MtdNamePtr);
+            return LE_FAULT;
+        }
+
+        inOffset += sizeof(pa_fwupdate_PatchMetaHdr_t);
+        inLen -= sizeof(pa_fwupdate_PatchMetaHdr_t);
+
+        InPatch = true;
+    }
+
+    do
+    {
+        if (-1 == PatchFd)
+        {
+            dataToHdrPtr = (uint8_t*)(inOffset + dataPtr);
+
+            if ((remLen > 0) && (remLen < sizeof(pa_fwupdate_PatchHdr_t)))
+            {
+                // Header is across this chunk and the next
+                memcpy(&PatchHdr, dataToHdrPtr, remLen);
+                PatchRemLen = remLen - sizeof(pa_fwupdate_PatchHdr_t);
+                LE_DEBUG("Patch header need to continue on next header... %x\n", PatchRemLen);
+                break;
+            }
+            else if (PatchRemLen < 0)
+            {
+                // This patch overlaps the chunk
+                PatchRemLen = -PatchRemLen;
+                LE_DEBUG("Patch header continue here... %x\n", PatchRemLen);
+                memcpy((uint8_t*)&PatchHdr + (sizeof(pa_fwupdate_PatchHdr_t) - PatchRemLen),
+                       dataToHdrPtr,
+                       PatchRemLen);
+                inOffset = PatchRemLen - sizeof(pa_fwupdate_PatchHdr_t);
+                dataToHdrPtr = (uint8_t*)(&PatchHdr);
+                PatchHdr.offset = TranslateNetworkByteOrder( &dataToHdrPtr );
+                PatchHdr.number = TranslateNetworkByteOrder( &dataToHdrPtr );
+                PatchHdr.size = TranslateNetworkByteOrder( &dataToHdrPtr );
+                LE_DEBUG("Patch %d complete: At offset %x size %x\n",
+                         PatchHdr.number, PatchHdr.offset, PatchHdr.size);
+                dataToHdrPtr = (uint8_t*)(inOffset + dataPtr);
+                inLen += (sizeof(pa_fwupdate_PatchHdr_t) - PatchRemLen);
+            }
+            else
+            {
+                PatchHdr.offset = TranslateNetworkByteOrder( &dataToHdrPtr );
+                PatchHdr.number = TranslateNetworkByteOrder( &dataToHdrPtr );
+                PatchHdr.size = TranslateNetworkByteOrder( &dataToHdrPtr );
+            }
+
+            LE_DEBUG("Patch %d: At offset %x size %x\n",
+                    PatchHdr.number, PatchHdr.offset, PatchHdr.size);
+            inOffset += sizeof(pa_fwupdate_PatchHdr_t);
+            inLen -= sizeof(pa_fwupdate_PatchHdr_t);
+
+            PatchFd = open( "/tmp/.tmp.patch", O_TRUNC | O_CREAT | O_WRONLY, 0600 );
+            if (PatchFd < 0 )
+            {
+               LE_CRIT("Failed to create patch file: %m");
+               goto error;
+            }
+            PatchRemLen = PatchHdr.size;
+        }
+
+        // > 0 if several patches are in chunk
+        // < 0 if this patch overlaps the chunk
+        remLen = inLen - (int)PatchRemLen;
+        wrLen = (inLen > (int)PatchRemLen ? (int)PatchRemLen : inLen);
+
+        LE_DEBUG("Patch %u: Writing to patch file %d: wrLen = %d, remLen %d, "
+                 "inOffset %x, Patch.size %u, PatchRemLen %d\n",
+                 PatchHdr.number, PatchFd, (int)wrLen, (int)remLen,
+                 (int)inOffset, PatchHdr.size, PatchRemLen);
+        if (wrLen != write( PatchFd, dataPtr + inOffset, wrLen ))
+        {
+            LE_ERROR("Write to patch fails: %m");
+            goto error;
+        }
+
+        PatchRemLen -= wrLen;
+
+        if (PatchRemLen == 0)
+        {
+            pa_patch_Context_t ctx;
+            le_result_t res;
+
+            close(PatchFd);
+            PatchFd = -1;
+            LE_INFO("Applying patch %d, size %d at %x\n",
+                    PatchHdr.number, PatchHdr.size, PatchHdr.offset);
+
+            ctx.segmentSize = PatchMetaHdr.segmentSize;
+            ctx.patchOffset = PatchHdr.offset;
+            if( PatchMetaHdr.ubiVolId == 0xFFFFFFFFU )
+            {
+                ctx.origImage = PA_PATCH_IMAGE_RAWFLASH;
+                ctx.destImage = PA_PATCH_IMAGE_RAWFLASH;
+            }
+            else
+            {
+                ctx.origImage = PA_PATCH_IMAGE_UBIFLASH;
+                ctx.destImage = PA_PATCH_IMAGE_UBIFLASH;
+            }
+            ctx.origImageSize = PatchMetaHdr.origSize;
+            ctx.origImageCrc32 = PatchMetaHdr.origCrc32;
+            ctx.origImageDesc.flash.mtdNum = mtdOrigNum;
+            ctx.origImageDesc.flash.ubiVolId = PatchMetaHdr.ubiVolId;
+            ctx.destImageSize = PatchMetaHdr.destSize;
+            ctx.destImageCrc32 = PatchMetaHdr.destCrc32;
+            ctx.destImageDesc.flash.mtdNum = mtdDestNum;
+            ctx.destImageDesc.flash.ubiVolId = PatchMetaHdr.ubiVolId;
+
+            res = bsPatch( &ctx,
+                           "/tmp/.tmp.patch",
+                           &PatchCrc32,
+                           PatchMetaHdr.numPatches == PatchHdr.number,
+                           false);
+            unlink("/tmp/.tmp.patch");
+            if( LE_OK != res )
+            {
+                goto error;
+            }
+        }
+        inOffset += wrLen;
+        inLen -= wrLen;
+
+        if( remLen > 0)
+        {
+            LE_DEBUG("NewPatch expected wrLen %d, remLen %d at %x\n",
+                     (int)wrLen, (int)remLen, (int)inOffset);
+        }
+    } while( remLen > 0 );
+
+    if ((offset + *lengthPtr) >= hdrPtr->imageSize )
+    {
+        InPatch = false;
+        LE_INFO( "Patch applied\n");
+        close(PatchFd);
+        PatchFd = -1;
+        if( PatchMetaHdr.ubiVolId != 0xFFFFFFFFU )
+        {
+            if( LE_OK != CheckUbiData( mtdDestNum,
+                                       PatchMetaHdr.ubiVolId,
+                                       PatchMetaHdr.destSize,
+                                       PatchMetaHdr.destCrc32 ) )
+            {
+                LE_CRIT("UBI Patch failed Partition %d (\"%s\") CRC32 does not match",
+                        mtdDestNum, MtdNamePtr);
+                return LE_FAULT;
+            }
+        }
+        else
+        {
+            CheckData( mtdDestNum,
+                       isDestLogical,
+                       isDestDual,
+                       PatchMetaHdr.destSize,
+                       0,
+                       PatchMetaHdr.destCrc32 );
+        }
+        LE_DEBUG( "CRC32: Expected %X patched %X\n", PatchMetaHdr.destCrc32, PatchCrc32 );
+    }
+
+    return LE_OK;
+
+error:
+    InPatch = false;
+    if (-1 != PatchFd)
+    {
+        close(PatchFd);
+        PatchFd = -1;
+    }
+    unlink("/tmp/.tmp.patch");
+    res = bsPatch( NULL, NULL, NULL, true, true );
+    return (forceClose ? res : LE_FAULT);
+}
+
+//--------------------------------------------------------------------------------------------------
+/**
  * Write data into SBL (SBL scrub)
  *
  * @return
@@ -711,7 +1171,7 @@ static le_result_t WriteDataSBL
         memset(RawImagePtr, 0, sizeof(uint8_t*) * (flashInfo.nbBlk / 2));
     }
 
-    // Check that the chunck is inside the SBL temporary image
+    // Check that the chunk is inside the SBL temporary image
     if ((offset + *lengthPtr) > ImageSize)
     {
         LE_ERROR("SBL image size and offset/length mismatch: %u < %u+%u",
@@ -1094,6 +1554,13 @@ static le_result_t WriteData
         return WriteNvup(hdrPtr, lengthPtr, offset, dataPtr, isFlashed);
     }
 
+    // Delta patch
+    if (hdrPtr->miscOpts & MISC_OPTS_DELTAPATCH)
+    {
+        LE_INFO( "Applying delta patch to %u\n", hdrPtr->imageType );
+        return ApplyPatch( format, hdrPtr, lengthPtr, offset, dataPtr, forceClose );
+    }
+
     if (hdrPtr->imageType == CWE_IMAGE_TYPE_SBL1)
     {
         // SBL is managed by a specific flash scheme
@@ -1346,41 +1813,6 @@ static bool ImageTypeValidate
     LE_DEBUG ("retVal %d --> image type %d", retVal, *enumValuePtr);
 
     return retVal;
-}
-
-//--------------------------------------------------------------------------------------------------
-/**
- * This function is used to get a 32 bit value from a packet in network byte order and increment the
- * packet pointer beyond the extracted field
- *
- * @return
- *      - LE_OK            The request was accepted
- *      - LE_BAD_PARAMETER The parameter is invalid
- *      - LE_NOT_POSSIBLE  The action is not compliant with the SW update state (no downloaded pkg)
- *      - LE_FAULT         If an error occurs
- */
-//--------------------------------------------------------------------------------------------------
-static uint32_t TranslateNetworkByteOrder
-(
-    uint8_t** packetPtrPtr ///< [IN] memory location of the pointer to the packet from which the 32 bit
-                           ///< value will be read
-)
-{
-    uint32_t field;
-    uint8_t* packetPtr;
-
-    packetPtr = *packetPtrPtr;
-
-    field = *packetPtr++;
-    field <<= 8;
-    field += *packetPtr++;
-    field <<= 8;
-    field += *packetPtr++;
-    field <<= 8;
-    field += *packetPtr++;
-    *packetPtrPtr = packetPtr;
-
-    return field;
 }
 
 //--------------------------------------------------------------------------------------------------
