@@ -2750,7 +2750,7 @@ le_result_t pa_fwupdate_Download
                         do
                         {
                             readCount = read (fd, bufferPtr, DataLenToBeRead);
-                            if ((-1 == readCount) && (EAGAIN == errno))
+                            if (((-1 == readCount) && (EAGAIN == errno)) || (!readCount))
                             {
                                 FD_ZERO(&fdSetRead);
                                 FD_SET(fd, &fdSetRead);
