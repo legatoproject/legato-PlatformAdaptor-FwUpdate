@@ -1554,8 +1554,10 @@ static le_result_t ApplyPatch
                 PatchMetaHdr.origSize, PatchMetaHdr.origCrc32,
                 PatchMetaHdr.destSize, PatchMetaHdr.destCrc32);
 
-        if (PatchMetaHdr.ubiVolId != 0xFFFFFFFFU)
+        if (PA_PATCH_INVALID_UBI_VOL_ID != PatchMetaHdr.ubiVolId)
         {
+            // Patch is related to an UBI volume
+            // Check if the image inside the original UBI container has to right CRC
             if (LE_OK != CheckUbiData( mtdOrigNum,
                                        PatchMetaHdr.ubiVolId,
                                        PatchMetaHdr.origSize,
@@ -1564,6 +1566,8 @@ static le_result_t ApplyPatch
                 LE_CRIT("Cannot apply patch. Partition \%s\" is not conform", MtdNamePtr);
                 goto error;
             }
+            // Check if the image inside the destination is a UBI container and the volume
+            // ID exists
             if (LE_OK != CheckUbiData( mtdDestNum,
                                        PatchMetaHdr.ubiVolId,
                                        0,
@@ -1584,7 +1588,12 @@ static le_result_t ApplyPatch
                     MtdNamePtr);
             return LE_FAULT;
         }
+        else
+        {
+            // Do nothing... CRC match
+        }
 
+        // Skip Meta header and Meta header length
         inOffset += sizeof(PatchMetaHdr_t);
         inLen -= sizeof(PatchMetaHdr_t);
 
@@ -1599,7 +1608,7 @@ static le_result_t ApplyPatch
 
             if ((remLen > 0) && (remLen < sizeof(PatchHdr_t)))
             {
-                // Header is across this chunk and the next
+                // Header is across this chunk and the next one
                 memcpy(&PatchHdr, dataToHdrPtr, remLen);
                 PatchRemLen = remLen - sizeof(PatchHdr_t);
                 LE_DEBUG("Patch header need to continue on next header... 0x%x\n", PatchRemLen);
@@ -1607,7 +1616,8 @@ static le_result_t ApplyPatch
             }
             else if (PatchRemLen < 0)
             {
-                // This patch overlaps the chunk
+                // This patch overlaps the chunk. So recompose the header and the patch with
+                // two chunks
                 PatchRemLen = -PatchRemLen;
                 LE_DEBUG("Patch header continue here... 0x%x\n", PatchRemLen);
                 memcpy((uint8_t*)&PatchHdr + (sizeof(PatchHdr_t) - PatchRemLen),
@@ -1632,11 +1642,13 @@ static le_result_t ApplyPatch
 
             LE_DEBUG("Patch %d: At offset 0x%x size 0x%x\n",
                      PatchHdr.number, PatchHdr.offset, PatchHdr.size);
+            // Skip the patch header
             inOffset += sizeof(PatchHdr_t);
             inLen -= sizeof(PatchHdr_t);
 
+            // Create a new file containing the patch body
             PatchFd = open( TMP_PATCH_PATH, O_TRUNC | O_CREAT | O_WRONLY, 0600 );
-            if (PatchFd < 0 )
+            if (-1 == PatchFd)
             {
                 LE_CRIT("Failed to create patch file: %m");
                 goto error;
@@ -1647,7 +1659,7 @@ static le_result_t ApplyPatch
         // > 0 if several patches are in chunk
         // < 0 if this patch overlaps the chunk
         remLen = inLen - (int)PatchRemLen;
-        wrLen = (inLen > (int)PatchRemLen ? (int)PatchRemLen : inLen);
+        wrLen = (inLen > (int)PatchRemLen) ? (int)PatchRemLen : inLen;
 
         LE_DEBUG("Patch %u: Writing to patch file %d: wrLen = %d, remLen %d, "
                  "inOffset 0x%x, Patch.size %u, PatchRemLen %d\n",
@@ -1661,7 +1673,8 @@ static le_result_t ApplyPatch
 
         PatchRemLen -= wrLen;
 
-        if (PatchRemLen == 0)
+        // Patch is complete. So apply it using bspatch
+        if (0 == PatchRemLen)
         {
             pa_patch_Context_t ctx;
             le_result_t res;
@@ -1671,9 +1684,10 @@ static le_result_t ApplyPatch
             LE_INFO("Applying patch %d, size %d at 0x%x\n",
                     PatchHdr.number, PatchHdr.size, PatchHdr.offset);
 
+            // Fill the patch context for origin and destination images
             ctx.segmentSize = PatchMetaHdr.segmentSize;
             ctx.patchOffset = PatchHdr.offset;
-            if (PatchMetaHdr.ubiVolId == 0xFFFFFFFFU)
+            if( PA_PATCH_INVALID_UBI_VOL_ID == PatchMetaHdr.ubiVolId )
             {
                 ctx.origImage = PA_PATCH_IMAGE_RAWFLASH;
                 ctx.destImage = PA_PATCH_IMAGE_RAWFLASH;
@@ -1710,6 +1724,7 @@ static le_result_t ApplyPatch
         inOffset += wrLen;
         inLen -= wrLen;
 
+        // Check if a new patch is remaining in the chunk
         if (remLen > 0)
         {
             LE_DEBUG("NewPatch expected wrLen %d, remLen %d at 0x%x\n",
@@ -1717,13 +1732,18 @@ static le_result_t ApplyPatch
         }
     } while (remLen > 0);
 
+    res = LE_OK;
+
     if ((offset + length) >= hdrPtr->imageSize )
     {
+        // The whole patche segments were applied to destination image
         InPatch = false;
         LE_INFO( "Patch applied\n");
         close(PatchFd);
         PatchFd = -1;
-        if (PatchMetaHdr.ubiVolId != 0xFFFFFFFFU)
+
+        // Check if destination CRC is the expected one
+        if (PA_PATCH_INVALID_UBI_VOL_ID != PatchMetaHdr.ubiVolId)
         {
             if (LE_OK != CheckUbiData( mtdDestNum,
                                        PatchMetaHdr.ubiVolId,
@@ -1737,17 +1757,22 @@ static le_result_t ApplyPatch
         }
         else
         {
-            CheckData( mtdDestNum,
-                       isDestLogical,
-                       isDestDual,
-                       PatchMetaHdr.destSize,
-                       0,
-                       PatchMetaHdr.destCrc32 );
+            if (LE_OK != CheckData( mtdDestNum,
+                                    isDestLogical,
+                                    isDestDual,
+                                    PatchMetaHdr.destSize,
+                                    0,
+                                    PatchMetaHdr.destCrc32 ))
+            {
+                LE_CRIT("Patch failed Partition %d (\"%s\") CRC32 does not match",
+                        mtdDestNum, MtdNamePtr);
+                res = LE_FAULT;
+            }
         }
-        LE_DEBUG( "CRC32: Expected 0x%X patched 0x%X\n", PatchMetaHdr.destCrc32, PatchCrc32 );
+        LE_DEBUG( "CRC32: Expected 0x%X Patched 0x%X", PatchMetaHdr.destCrc32, PatchCrc32 );
     }
 
-    return LE_OK;
+    return res;
 
 error:
     InPatch = false;
@@ -2083,7 +2108,7 @@ critical:
     // The SBL may be partially updated or corrupted
     LE_CRIT("SBL is not updated correctly");
 error:
-    LE_ERROR("Update for partiton %s failed with return %d", MtdNamePtr, LE_FAULT);
+    LE_ERROR("Update for partiton %s failed with return %d", MtdNamePtr, res);
 forceclose:
     res = LE_OK;
     if (flashFd)

@@ -132,7 +132,7 @@ pa_flash_Info_t;
  */
 //--------------------------------------------------------------------------------------------------
 // Opaque structure for internal usage
-typedef void* pa_flash_Desc_t;
+typedef void *pa_flash_Desc_t;
 
 //--------------------------------------------------------------------------------------------------
 /**
@@ -512,7 +512,7 @@ le_result_t pa_flash_WriteUbiAtBlock
     uint32_t leb,             ///< [IN] LEB to write
     uint8_t *dataPtr,         ///< [IN] Pointer to data to be written
     size_t dataSize,          ///< [IN][OUT] Size to be written
-    bool extendUbiVolume      ///< [IN] True if the volume may be extended by one block if write
+    bool isExtendUbiVolume    ///< [IN] True if the volume may be extended by one block if write
                               ///<      is the leb is outside the current volume
 );
 

@@ -827,8 +827,7 @@ le_result_t pa_flash_SeekAtBlock
 
 //--------------------------------------------------------------------------------------------------
 /**
- * Read the data starting at current position. If a Bad block is detected,
- * the error LE_IO_ERROR is returned and operation is aborted.
+ * Read the data starting at current position.
  * Note that the length should not be greater than eraseSize
  *
  * @return
@@ -886,8 +885,9 @@ le_result_t pa_flash_Read
 
 //--------------------------------------------------------------------------------------------------
 /**
- * Write the data starting at current position. If a Bad block is detected,
- * the error LE_IO_ERROR is returned and operation is aborted.
+ * Write the data starting at current position. If the write operation fails, try to erase the
+ * block and re do the write. If the erase fails, the error LE_IO_ERROR is returned and operation
+ * is aborted.
  * Note that the block should be erased before the first write (pa_flash_EraseAtBlock)
  * Note that the length should be a multiple of writeSize and should not be greater than eraseSize
  *
@@ -982,9 +982,7 @@ le_result_t pa_flash_ReadAtBlock
 )
 {
     pa_flash_MtdDesc_t *descPtr = (pa_flash_MtdDesc_t *)desc;
-    int rc;
-    uint32_t peb = blockIndex;
-    off_t pOffset;
+    le_result_t res;
 
     if( (!descPtr) || (descPtr->magic != desc) || (!dataPtr) )
     {
@@ -1001,27 +999,13 @@ le_result_t pa_flash_ReadAtBlock
         return LE_OUT_OF_RANGE;
     }
 
-    if( descPtr->scanDone )
+    res = pa_flash_SeekAtBlock( desc, blockIndex );
+    if( LE_OK == res)
     {
-        peb = descPtr->lebToPeb[blockIndex];
-        if( -1 == peb )
-        {
-            return LE_NOT_PERMITTED;
-        }
+        res = pa_flash_Read( desc, dataPtr, dataSize );
     }
 
-    pOffset = (off_t)(peb * descPtr->mtdInfo.eraseSize)
-                  + descPtr->mtdInfo.startOffset;
-    // Until read(2) succeed, set the position to the block to read
-    rc = lseek(descPtr->fd, pOffset, SEEK_SET);
-    if( -1 == rc )
-    {
-        LE_ERROR("MTD %d: lseek fails at peb %u offset %lx: %m",
-                 descPtr->mtdNum, peb, pOffset);
-        return (EIO == errno) ? LE_IO_ERROR : LE_FAULT;
-    }
-
-    return pa_flash_Read( desc, dataPtr, dataSize );
+    return res;
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -1049,9 +1033,7 @@ le_result_t pa_flash_WriteAtBlock
 )
 {
     pa_flash_MtdDesc_t *descPtr = (pa_flash_MtdDesc_t *)desc;
-    int rc;
-    uint32_t peb = blockIndex;
-    off_t pOffset;
+    le_result_t res;
 
     if( (!descPtr) || (descPtr->magic != desc) || (!dataPtr) )
     {
@@ -1069,25 +1051,12 @@ le_result_t pa_flash_WriteAtBlock
         return LE_OUT_OF_RANGE;
     }
 
-    if( descPtr->scanDone )
+    res = pa_flash_SeekAtBlock( desc, blockIndex );
+    if( LE_OK == res)
     {
-        peb = descPtr->lebToPeb[blockIndex];
-        if(-1 == peb )
-        {
-            return LE_NOT_PERMITTED;
-        }
+        res = pa_flash_Write( desc, dataPtr, dataSize );
     }
 
-    pOffset = (off_t)(peb * descPtr->mtdInfo.eraseSize)
-                  + descPtr->mtdInfo.startOffset;
-    rc = lseek(descPtr->fd, pOffset, SEEK_SET);
-    if( -1 == rc )
-    {
-        LE_ERROR("MTD %d: lseek fails at peb %u offset %lx: %m",
-                 descPtr->mtdNum, peb, pOffset);
-        return (EIO == errno) ? LE_IO_ERROR : LE_FAULT;
-    }
-
-    return pa_flash_Write( desc, dataPtr, dataSize );
+    return res;
 }
 
