@@ -2,7 +2,13 @@ requires:
 {
     api:
     {
+        le_fs.api
         le_fwupdate.api  [types-only]
+    }
+
+    component:
+    {
+        $LEGATO_FS
     }
 }
 
@@ -25,6 +31,7 @@ cflags:
     -I$LEGATO_ROOT/3rdParty/bsdiff-4.3
     -I$LEGATO_ROOT/3rdParty/include
     -I$LEGATO_ROOT/components/fwupdate/platformAdaptor/inc
+    -I$LEGATO_ROOT/interfaces/modemServices
 }
 
 ldflags:
