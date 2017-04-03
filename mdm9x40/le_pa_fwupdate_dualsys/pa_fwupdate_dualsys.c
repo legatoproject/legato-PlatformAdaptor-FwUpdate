@@ -20,6 +20,7 @@
 #include <sys/reboot.h>
 #include <linux/reboot.h>
 #include <sys/select.h>
+#include <sys/stat.h>
 #include <netinet/in.h>
 
 
@@ -3187,8 +3188,18 @@ static le_result_t ReadSync
 
     while(1)
     {
-        n = epoll_wait(efd, events, sizeof(events), DEFAULT_TIMEOUT_MS);
-        LE_DEBUG("n=%d", n);
+        if (-1 == efd)
+        {
+            // fd is a regular file, not compliant with epoll, simulate it
+            n = 1;
+            events[0].events = EPOLLIN;
+            events[0].data.fd = fd;
+        }
+        else
+        {
+            n = epoll_wait(efd, events, sizeof(events), DEFAULT_TIMEOUT_MS);
+            LE_DEBUG("n=%d", n);
+        }
         switch (n)
         {
             case -1:
@@ -3235,7 +3246,6 @@ static le_result_t ReadSync
                 }
                 break;
         }
-
     }
 
     return LE_FAULT;
@@ -3305,6 +3315,53 @@ static le_result_t CreateAndConfEpoll
     }
 
     *efdPtr = efd;
+
+    return LE_OK;
+}
+
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Check the file descriptor type
+ *
+ * @return
+ *      - LE_OK             If fd is socket, pipe or regular file
+ *      - LE_FAULT          On other file descriptor type
+ */
+//--------------------------------------------------------------------------------------------------
+static le_result_t CheckFdType
+(
+    int fd,                     ///< [IN] file descriptor to test
+    bool *isRegularFilePtr      ///< [OUT] true if fd is a regular file
+)
+{
+    struct stat buf;
+
+    if (-1 == fstat(fd, &buf))
+    {
+        LE_ERROR("fstat error %m");
+        return LE_FAULT;
+    }
+
+    switch (buf.st_mode & S_IFMT)
+    {
+        case 0:       // unknown type
+        case S_IFDIR: // directory
+        case S_IFLNK: // link
+            LE_ERROR("Bad file descriptor type 0x%x", buf.st_mode & S_IFMT);
+            return LE_FAULT;
+
+        case S_IFIFO:  // fifo or pipe
+        case S_IFSOCK: // socket
+            LE_DEBUG("Socket, fifo or pipe");
+            *isRegularFilePtr = false;
+            break;
+
+        default:
+            LE_DEBUG("Regular file");
+            *isRegularFilePtr = true;
+            break;
+    }
 
     return LE_OK;
 }
@@ -3597,9 +3654,10 @@ le_result_t pa_fwupdate_Download
     pa_fwupdate_InternalStatus_t updateStatus = PA_FWUPDATE_INTERNAL_STATUS_UNKNOWN;
     uint8_t* bufferPtr = le_mem_ForceAlloc (ChunkPool);
     int efd = -1;
+    bool isRegularFile;
 
     LE_DEBUG ("fd %d", fd);
-    if (fd < 0)
+    if ((fd < 0) || (LE_OK != CheckFdType(fd, &isRegularFile)))
     {
         updateStatus = PA_FWUPDATE_INTERNAL_STATUS_DWL_FAILED;
         LE_ERROR ("bad parameter");
@@ -3639,17 +3697,20 @@ le_result_t pa_fwupdate_Download
         totalCount = saveCtxPtr->totalRead;
     }
 
-    /* Like we use select(2), force the O_NONBLOCK flags in fd */
+    /* Like we use epoll(2), force the O_NONBLOCK flags in fd */
     result = MakeFdNonBlocking(fd);
     if (result != LE_OK)
     {
         goto error;
     }
 
-    result = CreateAndConfEpoll(fd, &efd);
-    if (result != LE_OK)
+    if (!isRegularFile)
     {
-        goto error;
+        result = CreateAndConfEpoll(fd, &efd);
+        if (result != LE_OK)
+        {
+            goto error;
+        }
     }
 
     /* Both systems are synchronized or a valid resume context has been found */
