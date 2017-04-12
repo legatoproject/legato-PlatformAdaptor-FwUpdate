@@ -9,6 +9,10 @@ requires:
 sources:
 {
     pa_fwupdate_dualsys.c
+    deltaUpdate.c
+    utils.c
+    partition.c
+    cwe.c
     ../../pa_flash/src/pa_flash_mtd.c
     ../../pa_flash/src/pa_flash_ubi.c
     ../../pa_patch/src/pa_patch.c

@@ -118,7 +118,7 @@ LE_SHARED le_result_t pa_fwupdate_SetSyncState
 //--------------------------------------------------------------------------------------------------
 LE_SHARED le_result_t pa_fwupdate_GetInitialSubSystemId
 (
-    uint8_t *initialSSId ///< [OUT] if LE_OK, the current boot system
+    uint8_t *initialSsidPtr ///< [OUT] if LE_OK, the current boot system
 );
 
 //--------------------------------------------------------------------------------------------------
@@ -161,6 +161,39 @@ LE_SHARED le_result_t pa_fwupdate_RequestUpdate
  */
 //--------------------------------------------------------------------------------------------------
 LE_SHARED le_result_t pa_fwupdate_CompleteUpdate
+(
+    void
+);
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Write a NVUP file in UD system
+ *
+ * @return
+ *      - LE_OK             on success
+ *      - LE_UNSUPPORTED    the feature is not supported
+ *      - LE_FAULT          on failure
+ *      - others            Depending of the underlying operations
+ */
+//--------------------------------------------------------------------------------------------------
+LE_SHARED le_result_t pa_fwupdate_NvupWrite
+(
+    size_t length,                      ///< [IN] data length
+    const uint8_t* dataPtr,             ///< [IN] input data
+    bool isEnd                          ///< [IN] flag to indicate the end of the file
+);
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * request to the modem to delete NVUP files
+ *
+ * @return
+ *      - LE_OK             on success
+ *      - LE_UNSUPPORTED    the feature is not supported
+ *      - LE_FAULT          on failure
+ */
+//--------------------------------------------------------------------------------------------------
+LE_SHARED le_result_t pa_fwupdate_NvupDelete
 (
     void
 );
