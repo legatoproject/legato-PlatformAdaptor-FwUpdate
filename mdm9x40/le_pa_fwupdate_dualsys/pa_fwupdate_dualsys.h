@@ -133,7 +133,7 @@ LE_SHARED le_result_t pa_fwupdate_GetInitialSubSystemId
 //--------------------------------------------------------------------------------------------------
 LE_SHARED le_result_t pa_fwupdate_Swap
 (
-    bool isSyncReq      ///< [IN] Indicate if a synchronization is requested after the swap
+    bool isMarkGoodReq      ///< [IN] Indicate if a mark good operation is required after install
 );
 
 //--------------------------------------------------------------------------------------------------

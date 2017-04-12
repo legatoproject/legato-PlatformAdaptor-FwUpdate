@@ -3220,7 +3220,7 @@ static void CheckSyncAtStartup
     if ((result == LE_OK) && sync)
     {
         /* Make a sync operation */
-        result = pa_fwupdate_DualSysSync();
+        result = pa_fwupdate_MarkGood();
         if (result != LE_OK)
         {
             LE_ERROR ("FW update component init: Sync failure %d", result);
@@ -3447,7 +3447,7 @@ static le_result_t CheckFdType
  *      - LE_FAULT          on failure
  */
 //--------------------------------------------------------------------------------------------------
-le_result_t pa_fwupdate_DualSysSync
+le_result_t pa_fwupdate_MarkGood
 (
     void
 )
@@ -3759,7 +3759,7 @@ le_result_t pa_fwupdate_Download
         bool bSync = false;
 
         // Get the systems synchronization state
-        result = pa_fwupdate_DualSysGetSyncState (&bSync);
+        result = pa_fwupdate_GetSystemState (&bSync);
         if ((LE_OK == result) && (false == bSync))
         {
             /* Both systems are not synchronized
@@ -4053,9 +4053,9 @@ le_result_t pa_fwupdate_GetInitialSubSystemId
  *      - LE_FAULT on failure
  */
 //--------------------------------------------------------------------------------------------------
-le_result_t pa_fwupdate_DualSysSwap
+le_result_t pa_fwupdate_Install
 (
-    bool isSyncReq      ///< [IN] Indicate if a synchronization is requested after the swap
+    bool isMarkGoodReq      ///< [IN] Indicate if a mark good operation is required after install
 )
 {
     le_result_t result;
@@ -4070,7 +4070,7 @@ le_result_t pa_fwupdate_DualSysSwap
     }
 
     /* Program the SWAP */
-    result = pa_fwupdate_Swap (isSyncReq);
+    result = pa_fwupdate_Swap (isMarkGoodReq);
     if (result == LE_OK)
     {
         /* request modem to check if there is NVUP files to apply
@@ -4101,19 +4101,19 @@ le_result_t pa_fwupdate_InitDownload
 )
 {
     le_result_t result, ret;
-    bool isSync = false;
+    bool isSystemGood = false;
 
     // Check whether both systems are synchronized and eventually initiate the synchronization.
-    result = pa_fwupdate_DualSysGetSyncState(&isSync);
+    result = pa_fwupdate_GetSystemState(&isSystemGood);
     if (LE_OK != result)
     {
         LE_ERROR("Checking synchronization has failed (%s)!", LE_RESULT_TXT(result));
         return LE_FAULT;
     }
-    else if (false == isSync)
+    else if (false == isSystemGood)
     {
         // Perform the synchronization
-        result = pa_fwupdate_DualSysSync();
+        result = pa_fwupdate_MarkGood();
         if (result != LE_OK)
         {
             LE_ERROR("failed to SYNC (%s)", LE_RESULT_TXT(result));
