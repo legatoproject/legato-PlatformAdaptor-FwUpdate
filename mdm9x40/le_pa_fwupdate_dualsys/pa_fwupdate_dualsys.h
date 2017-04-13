@@ -136,5 +136,34 @@ LE_SHARED le_result_t pa_fwupdate_Swap
     bool isSyncReq      ///< [IN] Indicate if a synchronization is requested after the swap
 );
 
+//--------------------------------------------------------------------------------------------------
+/**
+ * Request the flash access for a SW update
+ *
+ * @return
+ *      - LE_OK            on success
+ *      - LE_UNAVAILABLE   the flash access is not granted for SW update
+ *      - LE_FAULT         on failure
+ */
+//--------------------------------------------------------------------------------------------------
+LE_SHARED le_result_t pa_fwupdate_RequestUpdate
+(
+    void
+);
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Release the flash access after a SW update
+ *
+ * @return
+ *      - LE_OK           on success
+ *      - LE_FAULT        on failure
+ */
+//--------------------------------------------------------------------------------------------------
+LE_SHARED le_result_t pa_fwupdate_CompleteUpdate
+(
+    void
+);
+
 #endif /* LEGATO_PASWUPDATEDUALSYS_INCLUDE_GUARD */
 

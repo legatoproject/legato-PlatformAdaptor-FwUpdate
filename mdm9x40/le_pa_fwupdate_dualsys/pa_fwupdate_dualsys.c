@@ -24,18 +24,34 @@
 #include <netinet/in.h>
 
 
-// SBL number of passes needed to flash low/high and high/low SBL scrub
+//--------------------------------------------------------------------------------------------------
+/**
+ * SBL number of passes needed to flash low/high and high/low SBL scrub
+ */
+//--------------------------------------------------------------------------------------------------
 #define SBL_MAX_PASS              2
 
-// PBL is looking for SBL signature in the first 2MB of the flash device
-// Should avoid to put SBL outside this
+//--------------------------------------------------------------------------------------------------
+/**
+ * PBL is looking for SBL signature in the first 2MB of the flash device
+ * Should avoid to put SBL outside this
+ */
+//--------------------------------------------------------------------------------------------------
 #define SBL_MAX_BASE_IN_FIRST_2MB  (2*1024*1024)
 
-// Default timeout
+//--------------------------------------------------------------------------------------------------
+/**
+ * Default timeout
+ */
+//--------------------------------------------------------------------------------------------------
 #define DEFAULT_TIMEOUT_MS     900000
 
-// Timeout for select(): Set to timeout in seconds to give time for connection
-// through fd
+//--------------------------------------------------------------------------------------------------
+/**
+ * Timeout for select(): Set to timeout in seconds to give time for connection
+ * through fd
+ */
+//--------------------------------------------------------------------------------------------------
 #define SET_SELECT_TIMEOUT(tv, timeout) \
         do { \
             (tv)->tv_sec = timeout; \
@@ -1279,6 +1295,56 @@ static le_result_t CheckIfMounted
     }
 
     return res;
+}
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * This function requests the access to flash update
+ *
+ * @return
+ *      - LE_OK            The access is granted to fwupdate and update can begin
+ *      - LE_UNAVAILABLE   The access is not granted because flash is in use
+ *      - LE_FAULT         If an error occurs
+ */
+//--------------------------------------------------------------------------------------------------
+static le_result_t RequestSwUpdate
+(
+    void
+)
+{
+    le_result_t res;
+
+    // Request the SW update access to flash
+    res = pa_fwupdate_RequestUpdate();
+    if (LE_UNAVAILABLE == res)
+    {
+        // SW update is not allowed to access to the flash
+        LE_CRIT("access to flash not granted");
+    }
+    else if (LE_OK != res)
+    {
+        LE_ERROR("not possible to request SW update");
+    }
+    else
+    {
+        // Access is granted
+        LE_DEBUG("SW update has access granted");
+    }
+    return res;
+}
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * This function releases the access to flash update
+ */
+//--------------------------------------------------------------------------------------------------
+static void ReleaseSwUpdate
+(
+    void
+)
+{
+    // Complete. Release the flash access
+    pa_fwupdate_CompleteUpdate();
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -3377,6 +3443,7 @@ static le_result_t CheckFdType
  * @return
  *      - LE_OK             on success
  *      - LE_UNSUPPORTED    the feature is not supported
+ *      - LE_UNAVAILABLE    the flash access is not granted for SW update
  *      - LE_FAULT          on failure
  */
 //--------------------------------------------------------------------------------------------------
@@ -3412,6 +3479,7 @@ le_result_t pa_fwupdate_DualSysSync
     uint32_t crc32Src;
     bool isLogicalSrc, isLogicalDst, isDualSrc, isDualDst;
     pa_fwupdate_InternalStatus_t internalUpdateStatus;
+    le_result_t res;
 
     if (-1 == (iniBootSystem = GetInitialBootSystem()))
     {
@@ -3419,11 +3487,18 @@ le_result_t pa_fwupdate_DualSysSync
     }
     dualBootSystem = (iniBootSystem ? 0 : 1);
 
+    // Request the SW update access to flash
+    res = RequestSwUpdate();
+    if( LE_OK != res )
+    {
+        return res;
+    }
+
     // erase the resume context files
     if (LE_OK != EraseResumeCtx(&ResumeCtx))
     {
         LE_ERROR("Error during EraseResumeCtx()");
-        return LE_FAULT;
+        goto error;
     }
 
     le_result_t result = ReadDwlStatus(&internalUpdateStatus);
@@ -3439,7 +3514,7 @@ le_result_t pa_fwupdate_DualSysSync
     if (pa_fwupdate_SetState(PA_FWUPDATE_STATE_SYNC) != LE_OK)
     {
         LE_ERROR ("not possible to update the SW update state to SYNC");
-        return LE_FAULT;
+        goto error;
     }
 
     flashBlockPtr = (uint8_t *) le_mem_ForceAlloc(FlashImgPool);
@@ -3583,6 +3658,8 @@ le_result_t pa_fwupdate_DualSysSync
         }
     }
 
+    ReleaseSwUpdate();
+
     le_mem_Release(flashBlockPtr);
 
     LE_INFO ("done");
@@ -3594,6 +3671,8 @@ le_result_t pa_fwupdate_DualSysSync
     return LE_OK;
 
 error:
+    ReleaseSwUpdate();
+
     if (flashBlockPtr)
     {
         le_mem_Release(flashBlockPtr);
@@ -3640,6 +3719,7 @@ void pa_fwupdate_Reset
  *      - LE_BAD_PARAMETER   If an input parameter is not valid
  *      - LE_TIMEOUT         After 900 seconds without data received
  *      - LE_NOT_POSSIBLE    The systems are not synced
+ *      - LE_UNAVAILABLE     The flash access is not granted for SW update
  *      - LE_CLOSED          File descriptor has been closed before all data have been received
  *      - LE_FAULT           On failure
  */
@@ -3666,6 +3746,12 @@ le_result_t pa_fwupdate_Download
     }
 
     ResumeCtxSave_t *saveCtxPtr = &ResumeCtx.saveCtx;
+
+    result = RequestSwUpdate();
+    if (LE_OK != result)
+    {
+        goto error_noswupdatecomplete;
+    }
 
     // check if the resume context is empty or not
     if (saveCtxPtr->totalRead == 0)
@@ -3848,6 +3934,8 @@ le_result_t pa_fwupdate_Download
         }
     }
 
+    ReleaseSwUpdate();
+
     // Record the download status
     RECORD_DWL_STATUS(updateStatus);
 
@@ -3865,6 +3953,9 @@ le_result_t pa_fwupdate_Download
     return result;
 
 error:
+    ReleaseSwUpdate();
+
+error_noswupdatecomplete:
     if (result != LE_CLOSED) // if LE_CLOSED updateStatus is already to ONGOING
     {
         updateStatus = (result == LE_TIMEOUT) ? PA_FWUPDATE_INTERNAL_STATUS_DWL_TIMEOUT :
