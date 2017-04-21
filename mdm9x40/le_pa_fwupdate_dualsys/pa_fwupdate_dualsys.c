@@ -1524,15 +1524,15 @@ le_result_t pa_fwupdate_MarkGood
      */
     static const cwe_ImageType_t syncPartition[] = {
         CWE_IMAGE_TYPE_DSP2,
-        CWE_IMAGE_TYPE_APPS,
-        CWE_IMAGE_TYPE_APBL,
-        CWE_IMAGE_TYPE_SYST,
-        CWE_IMAGE_TYPE_USER,
         CWE_IMAGE_TYPE_QRPM,
         CWE_IMAGE_TYPE_TZON,
+        CWE_IMAGE_TYPE_APBL,
+        CWE_IMAGE_TYPE_APPS,
+        CWE_IMAGE_TYPE_SYST,
+        CWE_IMAGE_TYPE_USER,
         CWE_IMAGE_TYPE_CUS0,
     };
-    int iniBootSystem, dualBootSystem;
+    uint8_t iniBootSystem[PA_FWUPDATE_SUBSYSID_MAX], dualBootSystem[PA_FWUPDATE_SUBSYSID_MAX];
     int mtdSrc, mtdDst;
     int idx;
     pa_flash_Desc_t flashFdSrc = NULL, flashFdDst = NULL;
@@ -1545,11 +1545,13 @@ le_result_t pa_fwupdate_MarkGood
     pa_fwupdate_InternalStatus_t internalUpdateStatus;
     le_result_t res;
 
-    if (-1 == (iniBootSystem = partition_GetInitialBootSystem()))
+    if (LE_OK != partition_GetInitialBootSystem(iniBootSystem))
     {
         return LE_FAULT;
     }
-    dualBootSystem = (iniBootSystem ? 0 : 1);
+    dualBootSystem[PA_FWUPDATE_SUBSYSID_MODEM] = !iniBootSystem[PA_FWUPDATE_SUBSYSID_MODEM];
+    dualBootSystem[PA_FWUPDATE_SUBSYSID_LK] = !iniBootSystem[PA_FWUPDATE_SUBSYSID_LK];
+    dualBootSystem[PA_FWUPDATE_SUBSYSID_LINUX] = !iniBootSystem[PA_FWUPDATE_SUBSYSID_LINUX];
 
     // Request the SW update access to flash
     res = RequestSwUpdate();
@@ -1583,9 +1585,19 @@ le_result_t pa_fwupdate_MarkGood
 
     flashBlockPtr = (uint8_t *) le_mem_ForceAlloc(FlashImgPool);
 
-    LE_INFO( "Synchronizing from system %d to system %d", iniBootSystem + 1, dualBootSystem + 1);
+    LE_INFO( "Synchronizing from sub system MODEM from %d to %d",
+             iniBootSystem[PA_FWUPDATE_SUBSYSID_MODEM] + 1,
+             dualBootSystem[PA_FWUPDATE_SUBSYSID_MODEM] + 1);
+    LE_INFO( "Synchronizing from sub system LK from %d to %d",
+             iniBootSystem[PA_FWUPDATE_SUBSYSID_LK] + 1,
+             dualBootSystem[PA_FWUPDATE_SUBSYSID_LK] + 1);
+    LE_INFO( "Synchronizing from sub system LINUX from %d to %d",
+             iniBootSystem[PA_FWUPDATE_SUBSYSID_LINUX] + 1,
+             dualBootSystem[PA_FWUPDATE_SUBSYSID_LINUX] + 1);
     for (idx = 0; idx < sizeof( syncPartition )/sizeof(cwe_ImageType_t); idx++) {
-        if (-1 == (mtdSrc = partition_GetMtdFromImageType( syncPartition[idx], false, &mtdSrcNamePtr,
+        int subSysId = Partition_Identifier[syncPartition[idx]].subSysId;
+        if (-1 == (mtdSrc = partition_GetMtdFromImageType( syncPartition[idx],
+                                                           false, &mtdSrcNamePtr,
                                                            &isLogicalSrc, &isDualSrc )))
         {
             LE_ERROR( "Unable to determine initial partition for %d", syncPartition[idx] );
@@ -1618,10 +1630,10 @@ le_result_t pa_fwupdate_MarkGood
         LE_INFO( "Synchronizing %s partition \"%s%s\" (mtd%d) from \"%s%s\" (mtd%d)",
                  mtdDst == mtdSrc ? "logical" : "physical",
                  mtdDstNamePtr,
-                 mtdDst == mtdSrc && dualBootSystem ? "2" : "",
+                 mtdDst == mtdSrc && dualBootSystem[subSysId] ? "2" : "",
                  mtdDst,
                  mtdSrcNamePtr,
-                 mtdDst == mtdSrc && iniBootSystem ? "2" : "",
+                 mtdDst == mtdSrc && iniBootSystem[subSysId] ? "2" : "",
                  mtdSrc );
 
         if ( LE_OK != pa_flash_Open( mtdSrc,
@@ -2082,29 +2094,94 @@ le_result_t pa_fwupdate_GetResumePosition
 
 //--------------------------------------------------------------------------------------------------
 /**
- * Function which read the initial sub system id
+ * Read the initial system as follow:
+ *     [0] = modem sub-system
+ *     [1] = lk sub-system
+ *     [2] = linux sub-system
  *
  * @return
  *      - LE_OK            On success
  *      - LE_FAULT         On failure
  */
 //--------------------------------------------------------------------------------------------------
-le_result_t pa_fwupdate_GetInitialSubSystemId
+le_result_t pa_fwupdate_GetSystem
 (
-    uint8_t* initialSsidPtr ///< [OUT] if LE_OK, the current boot system
+    pa_fwupdate_System_t systemArray[PA_FWUPDATE_SUBSYSID_MAX]
+                         ///< [OUT] System array for "modem/lk/linux" partition groups
 )
 {
-    if (NULL == initialSsidPtr)
+    uint8_t iniBootSys[PA_FWUPDATE_SUBSYSID_MAX];
+    if (NULL == systemArray)
     {
-        LE_ERROR("initialSSId null pointer");
+        LE_ERROR("systemArray null pointer");
         return LE_FAULT;
     }
 
-    *initialSsidPtr = partition_GetInitialBootSystem() + 1; /* add 1 since
-                                                               partition_GetInitialBootSystem
-                                                               returns 0 or 1 */
+    if (LE_OK != partition_GetInitialBootSystem(iniBootSys))
+    {
+        LE_ERROR("Failed to get initial boot system");
+        return LE_FAULT;
+    }
 
+    int iSSid;
+
+    // In partition.c, the system are 0 and 1. Convert to PA_FWUPDATE_SYSTEM_1/2 enum
+    for (iSSid = PA_FWUPDATE_SUBSYSID_MODEM; iSSid <PA_FWUPDATE_SUBSYSID_MAX; iSSid++ )
+    {
+         systemArray[iSSid] = (iniBootSys[iSSid] ? PA_FWUPDATE_SYSTEM_2 : PA_FWUPDATE_SYSTEM_1);
+    }
     return LE_OK;
+}
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Set the system. This function will perform a reset if no error are reported
+ * The new system is defined by an array of 3 pa_fwupdate_System_t as follow:
+ *     [0] = modem sub-system
+ *     [1] = lk sub-system
+ *     [2] = linux sub-system
+ *
+ * @note On success, a device reboot is initiated without returning any value.
+ *
+ * @return
+ *      - LE_FAULT         On failure
+ */
+//--------------------------------------------------------------------------------------------------
+le_result_t pa_fwupdate_SetSystem
+(
+    pa_fwupdate_System_t systemArray[PA_FWUPDATE_SUBSYSID_MAX]
+                         ///< [IN] System array for "modem/lk/linux" partition groups
+)
+{
+    le_result_t result;
+    size_t position = 0;
+
+    // check if a resume is ongoing
+    result = pa_fwupdate_GetResumePosition(&position);
+    if ((LE_OK != result) || position)
+    {
+        LE_ERROR("swap not possible, a download is ongoing");
+        return LE_BUSY;
+    }
+
+    LE_INFO("Set Sub System: Modem %d Lk %d Linux %d",
+            systemArray[PA_FWUPDATE_SUBSYSID_MODEM], systemArray[PA_FWUPDATE_SUBSYSID_LK],
+            systemArray[PA_FWUPDATE_SUBSYSID_LINUX]);
+
+    /* Program the new "active" system */
+    result = pa_fwupdate_SetActiveSystem(systemArray, false);
+    if (result == LE_OK)
+    {
+        /* request modem to check if there is NVUP files to apply
+         * no need to check the result as SSID are already modified we need to reset */
+        pa_fwupdate_NvupApply();
+        /* make a system reset */
+        pa_fwupdate_Reset();
+        /* at this point the system is reseting */
+    }
+
+    LE_DEBUG ("Set result %d", result);
+    return LE_FAULT;
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -2125,6 +2202,8 @@ le_result_t pa_fwupdate_Install
 {
     le_result_t result;
     size_t position = 0;
+    pa_fwupdate_System_t systemArray[PA_FWUPDATE_SUBSYSID_MAX];
+    int ssid;
 
     // check if a resume is ongoing
     result = pa_fwupdate_GetResumePosition(&position);
@@ -2135,7 +2214,15 @@ le_result_t pa_fwupdate_Install
     }
 
     /* Program the SWAP */
-    result = pa_fwupdate_Swap (isMarkGoodReq);
+    result = pa_fwupdate_GetSystem (systemArray);
+    if (LE_OK == result)
+    {
+        for (ssid = PA_FWUPDATE_SUBSYSID_MODEM; ssid < PA_FWUPDATE_SUBSYSID_MAX; ssid++)
+        {
+            systemArray[ssid] ^= (PA_FWUPDATE_SYSTEM_1 | PA_FWUPDATE_SYSTEM_2);
+        }
+        result = pa_fwupdate_SetActiveSystem(systemArray, isMarkGoodReq);
+    }
     if (LE_OK == result)
     {
         /* request modem to check if there is NVUP files to apply
@@ -2351,30 +2438,38 @@ le_result_t pa_fwupdate_DisableSyncBeforeUpdate
 //--------------------------------------------------------------------------------------------------
 COMPONENT_INIT
 {
-    /* Allocate a pool for the data chunk */
+    // Allocate a pool for the data chunk
     ChunkPool = le_mem_CreatePool("ChunkPool", CHUNK_LENGTH);
     le_mem_ExpandPool(ChunkPool, 1);
 
     int mtdNum;
     pa_flash_Info_t flashInfo;
 
-    /* Get MTD information from SBL partition. This is will be used to fix the
-       pool object size and compute the max object size */
+    // Get MTD information from SBL partition. This is will be used to fix the
+    // pool object size and compute the max object size
     mtdNum = partition_GetMtdFromImageType( CWE_IMAGE_TYPE_SBL1, true, NULL, NULL, NULL );
     LE_FATAL_IF(-1 == mtdNum, "Unable to find a valid MTD for SBL image");
 
     LE_FATAL_IF(LE_OK != pa_flash_GetInfo( mtdNum, &flashInfo, false, false ),
                 "Unable to get MTD informations for SBL image");
 
-    /* Allocate a pool for the blocks to be flashed and checked */
+    // Allocate a pool for the blocks to be flashed and checked
     FlashImgPool = le_mem_CreatePool("FlashImagePool", flashInfo.eraseSize);
-    /* Request 3 blocks: 1 for flash, 1 spare, 1 for check */
+    // Request 3 blocks: 1 for flash, 1 spare, 1 for check
     le_mem_ExpandPool(FlashImgPool, 3);
 
-    /* Allocate a pool for the array to SBL blocks */
+    // Allocate a pool for the array to SBL blocks
     PartitionCtx.sblPool = le_mem_CreatePool("SBL Block Pool",
                                              sizeof(uint8_t*) * (flashInfo.nbBlk / 2));
     le_mem_ExpandPool(PartitionCtx.sblPool, 1);
+
+    // Just to get the SSID. This is used to initialize the Initial sub-system variables internally
+    pa_fwupdate_System_t systemArray[PA_FWUPDATE_SUBSYSID_MAX];
+
+    if (LE_OK != pa_fwupdate_GetSystem(systemArray))
+    {
+        LE_CRIT("Failed to get the Initial Sub System Id. fwupdateDaemon may be unusable");
+    }
 
     // Force release in case of crash between request and release
     ReleaseSwUpdate();

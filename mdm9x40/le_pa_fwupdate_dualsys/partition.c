@@ -55,88 +55,47 @@
 
 //--------------------------------------------------------------------------------------------------
 /**
- * Partition Name and Image Type matrix
+ * Partition Name, Sub System ID and Image Type matrix
  */
 //--------------------------------------------------------------------------------------------------
-static char* PartNamePtr[2][ CWE_IMAGE_TYPE_COUNT ] = {
-    {
-        NULL,
-        "sbl",
-        NULL,
-        NULL,
-        "modem",
-        NULL,
-        "rpm",
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        "boot",
-        "aboot",
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        "system",
-        "lefwkro",
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        "tz",
-        NULL,
-        NULL,
-        "userapp",
-        NULL,
-        "customer0",
-        "customer0",
-        "customer2",
-    },
-    {
-        NULL,
-        "sbl",
-        NULL,
-        NULL,
-        "modem2",
-        NULL,
-        "rpm",
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        "boot2",
-        "aboot2",
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        "system2",
-        "lefwkro2",
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        NULL,
-        "tz",
-        NULL,
-        NULL,
-        "userapp",
-        NULL,
-        "customer1",
-        "customer1",
-        "customer2",
-    },
+partition_Identifier_t Partition_Identifier[ CWE_IMAGE_TYPE_COUNT ] = {
+    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
+    { {   "sbl",          "sbl",         },   PA_FWUPDATE_SUBSYSID_MODEM },
+    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
+    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
+    { {   "modem",        "modem2",      },   PA_FWUPDATE_SUBSYSID_MODEM },
+    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
+    { {   "rpm",          "rpm",         },   PA_FWUPDATE_SUBSYSID_MODEM },
+    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
+    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
+    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
+    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
+    { {   "boot",         "boot2",       },   PA_FWUPDATE_SUBSYSID_LINUX },
+    { {   "aboot",        "aboot2",      },   PA_FWUPDATE_SUBSYSID_LK    },
+    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
+    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
+    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
+    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
+    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
+    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
+    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
+    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
+    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
+    { {   "system",       "system2",     },   PA_FWUPDATE_SUBSYSID_LINUX },
+    { {   "lefwkro",      "lefwkro2",    },   PA_FWUPDATE_SUBSYSID_LINUX },
+    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
+    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
+    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
+    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
+    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
+    { {   "tz",           "tz",          },   PA_FWUPDATE_SUBSYSID_MODEM },
+    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
+    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
+    { {   "userapp",      "userapp",     },   PA_FWUPDATE_SUBSYSID_LINUX  },
+    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
+    { {   "customer0",    "customer1",   },   PA_FWUPDATE_SUBSYSID_LINUX },
+    { {   "customer0",    "customer1",   },   PA_FWUPDATE_SUBSYSID_LINUX },
+    { {   "customer2",    "customer2",   },   PA_FWUPDATE_SUBSYSID_LINUX },
 };
 
 //--------------------------------------------------------------------------------------------------
@@ -170,45 +129,62 @@ static const unsigned char partition_SBLPreamble[8] = {
 //--------------------------------------------------------------------------------------------------
 static size_t  ImageSize = 0;
 
+//--------------------------------------------------------------------------------------------------
+/**
+ * Sub system defined by user. If not defined, it set to the default initial boot system.
+ */
+//--------------------------------------------------------------------------------------------------
+static int8_t InitialBootSystem[PA_FWUPDATE_SUBSYSID_MAX] =
+{
+    -1, -1, -1,
+};
+
 //==================================================================================================
 //                                       Private Functions
 //==================================================================================================
 
 //--------------------------------------------------------------------------------------------------
 /**
- * Get the initial MTD number used for rootfs (ubi0).
+ * Get the initial MTD number used for modem file-system (ubi1) and rootfs (ubi0)
  *
  * @return
  *      - LE_OK on success
- *      - LE_FAULT for any other errors
  */
 //--------------------------------------------------------------------------------------------------
 static le_result_t GetInitialBootSystemByUbi
 (
-    int* mtdNumPtr ///< [OUT] the MTD number used for rootfs (ubi0)
+    int* mtdModemNumPtr, ///< [OUT] the MTD number used for modem (ubi1)
+    int* mtdLinuxNumPtr  ///< [OUT] the MTD number used for rootfs (ubi0)
 )
 {
     FILE* flashFdPtr;
     le_result_t le_result = LE_OK;
+    int iUbi;
+    char ubiPath[PATH_MAX];
 
-    // Try to open the MTD belonging to ubi0
-    if (NULL == (flashFdPtr = fopen( SYS_CLASS_UBI_PATH "/ubi0/mtd_num", "r" )))
+    for( iUbi = 0; iUbi <= 1; iUbi++)
     {
-        LE_ERROR( "Unable to determine ubi0 mtd device: %m" );
-        le_result = LE_FAULT;
-        goto end;
+        snprintf(ubiPath, sizeof(ubiPath), SYS_CLASS_UBI_PATH "/ubi%d/mtd_num", iUbi);
+        // Try to open the MTD belonging to ubi0
+        if (NULL == (flashFdPtr = fopen( ubiPath, "r" )))
+        {
+            LE_ERROR( "Unable to determine ubi%d mtd device: %m", iUbi );
+            le_result = LE_FAULT;
+            goto end;
+        }
+        // Read the MTD number
+        if (1 != fscanf( flashFdPtr, "%d", ((0 == iUbi) ? mtdLinuxNumPtr : mtdModemNumPtr) ))
+        {
+            LE_ERROR( "Unable to determine ubi%d mtd device: %m", iUbi );
+            le_result = LE_FAULT;
+        }
+        else
+        {
+            LE_DEBUG( "ubi%d: %d", iUbi, *((0 == iUbi) ? mtdLinuxNumPtr : mtdModemNumPtr) );
+        }
+        fclose( flashFdPtr );
     }
-    // Read the MTD number
-    if (1 != fscanf( flashFdPtr, "%d", mtdNumPtr ))
-    {
-        LE_ERROR( "Unable to determine ubi0 mtd device: %m" );
-        le_result = LE_FAULT;
-    }
-    else
-    {
-        LE_DEBUG( "GetInitialBootSystemByUbi: %d", *mtdNumPtr );
-    }
-    fclose( flashFdPtr );
+
 end:
     return le_result;
 }
@@ -255,11 +231,12 @@ static le_result_t GetImageTypeFromMtd
     {
         for (partIndex = CWE_IMAGE_TYPE_MIN; partIndex < CWE_IMAGE_TYPE_COUNT; partIndex++)
         {
-            if (PartNamePtr[ partSystem ][ partIndex ] &&
-                (0 == strcmp( mtdFetchName, PartNamePtr[ partSystem ][ partIndex ])))
+            if (Partition_Identifier[ partIndex ].namePtr[ partSystem ] &&
+                (0 == strcmp( mtdFetchName,
+                              Partition_Identifier[ partIndex ].namePtr[ partSystem ])))
             {
                 // Found: output partition name and return image type
-                *mtdNamePtr = PartNamePtr[ partSystem ][ partIndex ];
+                *mtdNamePtr = Partition_Identifier[ partIndex ].namePtr[ partSystem ];
                 *imageTypePtr = partIndex;
                 return LE_OK;
             }
@@ -276,62 +253,116 @@ static le_result_t GetImageTypeFromMtd
 
 //--------------------------------------------------------------------------------------------------
 /**
- * Get the initial boot system using the mtd used for rootfs (ubi0). If the rootfs partition is
- * "system", initial boot system is 1, if it is "system2", initial boot system is 2.
+ * Get the initial boot system using the mtd used for rootfs (ubi0) and modem (ubi1). Read the
+ * ssdata to detect the LK boot system. The returned value is an array of three uint8_t as follow:
+ *     [0] = modem (tz/rpm/modem)
+ *     [1] = lk (aboot)
+ *     [2] = linux (boot/system/lefwkro)
  *
  * @return
- *      - 0 if initial boot system is 1,
- *      - 1 if initial boot system is 2,
- *      - -1 in case of failure
+ *      - LE_OK on success
+ *      - LE_FAULT for any other errors
  */
 //--------------------------------------------------------------------------------------------------
-int partition_GetInitialBootSystem
+le_result_t partition_GetInitialBootSystem
 (
-    void
+    uint8_t* initBootSysPtr ///< [OUT] System array for "modem/lk/linux" partition groups
 )
 {
-    static int InitialBootSystem = -1;
-
     // Check if initial boot system is already known. This is immutable until a reboot is performed
     // and a system swap is requested
-    if (-1 == InitialBootSystem)
+    if (-1 == InitialBootSystem[PA_FWUPDATE_SUBSYSID_LINUX])
     {
         // Get the initial MTD number for rootfs
         char *iniMtdNamePtr;
-        int iniMtd;
+        int iniMtdModem, iniMtdLinux;
         le_result_t result;
         cwe_ImageType_t imageType;
+        int iniSysLk;
 
-        result = GetInitialBootSystemByUbi(&iniMtd);
+        result = GetInitialBootSystemByUbi(&iniMtdModem, &iniMtdLinux);
 
-        if ((LE_OK != result) || (-1 == iniMtd))
+        if ((LE_OK != result) || (-1 == iniMtdModem) || (-1 == iniMtdLinux))
         {
             LE_ERROR( "Unable to determine initial boot system" );
-            return -1;
+            return LE_FAULT;
         }
 
-        // Get the partition name
-        if (LE_FAULT == GetImageTypeFromMtd( iniMtd, &iniMtdNamePtr, &imageType ))
+        // Get the partition name for modem
+        if (LE_FAULT == GetImageTypeFromMtd( iniMtdModem, &iniMtdNamePtr, &imageType ))
         {
-            LE_ERROR( "Unable to determine initial boot system" );
-            return -1;
+            LE_ERROR( "Unable to determine initial boot system for modem" );
+            return LE_FAULT;
+        }
+        // "modem2" : The initial boot modem is 2 (return 1)
+        if (0 == strcmp( "modem2", iniMtdNamePtr ))
+        {
+            InitialBootSystem[PA_FWUPDATE_SUBSYSID_MODEM] = 1;
+        }
+        // "modem" : The initial boot modem is 1 (return 0)
+        else if (0 == strcmp( "modem", iniMtdNamePtr ))
+        {
+            InitialBootSystem[PA_FWUPDATE_SUBSYSID_MODEM] = 0;
+        }
+        else
+        {
+            LE_ERROR( "Unable to determine initial boot system for modem" );
+            return LE_FAULT;
+        }
+
+        // Get the partition name for Linux rootfs (system)
+        if (LE_FAULT == GetImageTypeFromMtd( iniMtdLinux, &iniMtdNamePtr, &imageType ))
+        {
+            LE_ERROR( "Unable to determine initial boot system linux" );
+            return LE_FAULT;
         }
         // "system2" : The initial boot system is 2 (return 1)
         if (0 == strcmp( "system2", iniMtdNamePtr ))
         {
-            InitialBootSystem = 1;
+            InitialBootSystem[PA_FWUPDATE_SUBSYSID_LINUX] = 1;
         }
         // "system" : The initial boot system is 1 (return 0)
         else if (0 == strcmp( "system", iniMtdNamePtr ))
         {
-            InitialBootSystem = 0;
+            InitialBootSystem[PA_FWUPDATE_SUBSYSID_LINUX] = 0;
         }
         else
         {
-            LE_ERROR( "Unable to determine initial boot system" );
+            LE_ERROR( "Unable to determine initial boot system linux" );
+            return LE_FAULT;
         }
+
+        iniSysLk = system("/usr/bin/swidssd read lk");
+        if (WIFEXITED(iniSysLk))
+        {
+            iniSysLk = WEXITSTATUS(iniSysLk);
+            if (100 == iniSysLk)
+            {
+                InitialBootSystem[PA_FWUPDATE_SUBSYSID_LK] = 0;
+            }
+            else if (200 == iniSysLk)
+            {
+                InitialBootSystem[PA_FWUPDATE_SUBSYSID_LK] = 1;
+            }
+            else
+            {
+                LE_ERROR( "Unable to determine initial boot system lk" );
+                return LE_FAULT;
+            }
+        }
+        else
+        {
+            LE_ERROR( "Unable to determine initial boot system lk" );
+            return LE_FAULT;
+        }
+
+        LE_INFO("Initial Boot System: Modem %d LK %d Linux %d",
+                InitialBootSystem[PA_FWUPDATE_SUBSYSID_MODEM],
+                InitialBootSystem[PA_FWUPDATE_SUBSYSID_LK],
+                InitialBootSystem[PA_FWUPDATE_SUBSYSID_LINUX]);
     }
-    return InitialBootSystem;
+    memcpy( initBootSysPtr, InitialBootSystem, sizeof(InitialBootSystem) );
+    return LE_OK;
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -359,7 +390,10 @@ int partition_GetMtdFromImageType
 {
     FILE* flashFdPtr;
     char mtdBuf[100], mtdFetchName[16];
-    int mtdNum = -1, l, iniBootSystem, dualBootSystem;
+    int mtdNum = -1, l;
+    pa_fwupdate_SubSysId_t subSysId;
+    uint8_t iniBootSystem[PA_FWUPDATE_SUBSYSID_MAX], dualBootSystem[PA_FWUPDATE_SUBSYSID_MAX];
+
     char* mtdPartNamePtr;
 
     if (mtdNamePtr)
@@ -373,15 +407,26 @@ int partition_GetMtdFromImageType
         return -1;
     }
     // Active system bank
-    if (-1 == (iniBootSystem = partition_GetInitialBootSystem()))
+    if (LE_OK != partition_GetInitialBootSystem(iniBootSystem))
     {
         LE_ERROR("bad iniBootSystem");
         return -1;
     }
     // Dual system bank
-    dualBootSystem = (iniBootSystem ? 0 : 1);
+    dualBootSystem[PA_FWUPDATE_SUBSYSID_MODEM] = !iniBootSystem[PA_FWUPDATE_SUBSYSID_MODEM];
+    dualBootSystem[PA_FWUPDATE_SUBSYSID_LK] = !iniBootSystem[PA_FWUPDATE_SUBSYSID_LK];
+    dualBootSystem[PA_FWUPDATE_SUBSYSID_LINUX] = !iniBootSystem[PA_FWUPDATE_SUBSYSID_LINUX];
+    subSysId = Partition_Identifier[partName].subSysId;
+    // If PA_FWUPDATE_SUBSYSID_NONE, the partition (even if it exists) is not managed by fwupdate
+    // component
+    if (PA_FWUPDATE_SUBSYSID_NONE == subSysId)
+    {
+        LE_ERROR("partition not managed by fwupdate");
+        return -1;
+    }
 
-    mtdPartNamePtr = PartNamePtr[ inDual ? dualBootSystem : iniBootSystem ][ partName ];
+    mtdPartNamePtr = Partition_Identifier[partName].namePtr[inDual ? dualBootSystem[subSysId]
+                                                                   : iniBootSystem[subSysId]];
     // If NULL, the partition (even if it exists) is not managed by fwupdate component
     if (!mtdPartNamePtr)
     {
@@ -427,12 +472,11 @@ int partition_GetMtdFromImageType
 
     if (isLogical)
     {
-        *isLogical = ((CWE_IMAGE_TYPE_QRPM == partName) ||
-                      (CWE_IMAGE_TYPE_TZON == partName)) ? true : false;
+        *isLogical = ((CWE_IMAGE_TYPE_QRPM == partName) || (CWE_IMAGE_TYPE_TZON == partName));
     }
     if (isDual)
     {
-        *isDual = (inDual ? dualBootSystem : iniBootSystem) ? true : false;
+        *isDual = (inDual ? dualBootSystem[subSysId] : iniBootSystem[subSysId]) ? true : false;
     }
 
     // Return the MTD number

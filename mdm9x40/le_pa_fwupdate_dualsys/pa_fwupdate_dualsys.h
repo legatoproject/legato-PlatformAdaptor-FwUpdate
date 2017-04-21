@@ -109,21 +109,7 @@ LE_SHARED le_result_t pa_fwupdate_SetSyncState
 
 //--------------------------------------------------------------------------------------------------
 /**
- * Function which read the initial sub system id
- *
- * @return
- *      - LE_OK            On success
- *      - LE_FAULT         On failure
- */
-//--------------------------------------------------------------------------------------------------
-LE_SHARED le_result_t pa_fwupdate_GetInitialSubSystemId
-(
-    uint8_t *initialSsidPtr ///< [OUT] if LE_OK, the current boot system
-);
-
-//--------------------------------------------------------------------------------------------------
-/**
- * Program a swap between active and update systems
+ * Program the partitions to become active and update systems
  *
  * @return
  *      - LE_OK             on success
@@ -131,9 +117,11 @@ LE_SHARED le_result_t pa_fwupdate_GetInitialSubSystemId
  *      - LE_FAULT          on failure
  */
 //--------------------------------------------------------------------------------------------------
-LE_SHARED le_result_t pa_fwupdate_Swap
+LE_SHARED le_result_t pa_fwupdate_SetActiveSystem
 (
-    bool isMarkGoodReq      ///< [IN] Indicate if a mark good operation is required after install
+    pa_fwupdate_System_t systemArray[PA_FWUPDATE_SUBSYSID_MAX],
+                         ///< [IN] System array for "modem/lk/linux" partition groups
+    bool isMarkGoodReq   ///< [IN] Indicate if a mark good operation is required after install
 );
 
 //--------------------------------------------------------------------------------------------------

@@ -12,6 +12,7 @@
 
 #include "legato.h"
 #include "cwe_local.h"
+#include "pa_fwupdate.h"
 
 
 //--------------------------------------------------------------------------------------------------
@@ -30,18 +31,40 @@ partition_Ctx_t;
 
 //--------------------------------------------------------------------------------------------------
 /**
- * Get the initial boot system using the mtd used for rootfs (ubi0). If the rootfs partition is
- * "system", initial boot system is 1, if it is "system2", initial boot system is 2.
- *
- * @return
- *      - 0 if initial boot system is 1,
- *      - 1 if initial boot system is 2,
- *      - -1 in case of failure
+ * Partition active and dual name and sub system ID containing these partitions
  */
 //--------------------------------------------------------------------------------------------------
-int partition_GetInitialBootSystem
+typedef struct
+{
+    char                  *namePtr[2]; // Name of partition in system 1 and 2
+    pa_fwupdate_SubSysId_t subSysId;   // Sub system containing these partitions
+}
+partition_Identifier_t;
+
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Partition Name, Sub System ID and Image Type matrix
+ */
+//--------------------------------------------------------------------------------------------------
+extern partition_Identifier_t Partition_Identifier[ CWE_IMAGE_TYPE_COUNT ];
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Get the initial boot system using the mtd used for rootfs (ubi0) and modem (ubi1). Read the
+ * ssdata to detect the LK boot system. The returned value is an array of three uint8_t as follow:
+ *     [0] = modem (tz/rpm/modem)
+ *     [1] = lk (aboot)
+ *     [2] = linux (boot/system/lefwkro)
+ *
+ * @return
+ *      - LE_OK on success
+ *      - LE_FAULT for any other errors
+ */
+//--------------------------------------------------------------------------------------------------
+le_result_t partition_GetInitialBootSystem
 (
-    void
+    uint8_t* initBootSysPtr ///< [OUT] System array for "modem/lk/linux" partition groups
 );
 
 //--------------------------------------------------------------------------------------------------
