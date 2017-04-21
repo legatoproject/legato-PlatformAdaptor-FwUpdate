@@ -66,7 +66,7 @@ le_result_t pa_patch_Open
     pa_patch_InternalDesc_t *descPtr = NULL;
     pa_flash_OpenMode_t origMode = 0;
     pa_flash_OpenMode_t destMode = 0;
-    le_result_t res;
+    le_result_t res = LE_FAULT;
 
     if( (!ctx) || (!desc) || (!origDataPtr) || (!destDataPtr) )
     {
