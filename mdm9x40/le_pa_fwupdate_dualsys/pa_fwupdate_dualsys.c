@@ -4278,6 +4278,9 @@ COMPONENT_INIT
                                      sizeof(uint8_t*) * (flashInfo.nbBlk / 2));
     le_mem_ExpandPool(SblBlockPool, 1);
 
+    // Force release in case of crash between request and release
+    ReleaseSwUpdate();
+
     CheckSyncAtStartup();
 
     if (GetResumeCtx(&ResumeCtx) != LE_OK)
