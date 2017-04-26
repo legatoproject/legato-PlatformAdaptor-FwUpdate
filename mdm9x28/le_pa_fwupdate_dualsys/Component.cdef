@@ -2,13 +2,7 @@ requires:
 {
     api:
     {
-        le_fs.api
         le_fwupdate.api  [types-only]
-    }
-
-    component:
-    {
-        $LEGATO_FS
     }
 }
 
