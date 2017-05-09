@@ -121,6 +121,77 @@ error:
     return res;
 }
 
+//--------------------------------------------------------------------------------------------------
+/**
+ * Check if there is enough space on a destination partition
+ *
+ * @return
+ *      - LE_OK        on success
+ *      - LE_FAULT     on failure
+ */
+//--------------------------------------------------------------------------------------------------
+le_result_t IsFreeSpace
+(
+    deltaUpdate_Ctx_t *ctxPtr,  ///< [IN] Delta update context
+    int  mtdNum,                ///< [IN] mtd partition number
+    bool isLogical,             ///< [IN] Logical partition
+    bool isDual,                ///< [IN] Dual of a logical partition
+    bool *isFreePtr             ///< [OUT] flag set to true if there is enough space on the
+                                ///<       destination
+)
+{
+    const cwe_Header_t *cweHdrPtr = ctxPtr->cweHdrPtr;
+    const deltaUpdate_PatchMetaHdr_t *patchMetaHdrPtr = ctxPtr->metaHdrPtr;
+    pa_flash_Desc_t desc = NULL;
+
+    if (patchMetaHdrPtr->ubiVolId == PA_PATCH_INVALID_UBI_VOL_ID)
+    {
+        // RAW partition
+
+        pa_flash_Info_t flashInfo;
+        if (LE_OK != pa_flash_GetInfo(mtdNum, &flashInfo, isLogical, isDual))
+        {
+            LE_ERROR("Failed to get flash info.");
+            goto error;
+        }
+        *isFreePtr = !(cweHdrPtr->imageSize > flashInfo.size);
+    }
+    else
+    {
+        // UBI volume
+
+        le_result_t res;
+        pa_flash_Info_t *mtdInfoPtr;
+
+        res = pa_flash_Open( mtdNum, PA_FLASH_OPENMODE_READONLY, &desc, &mtdInfoPtr );
+        if (LE_OK != res)
+        {
+            LE_ERROR("Open of MTD %d fails: %d\n", mtdNum, res );
+            goto error;
+        }
+
+        res = pa_flash_ScanUbi( desc, patchMetaHdrPtr->ubiVolId );
+        if (LE_OK != res)
+        {
+            LE_ERROR("Scan of MTD %d UBI volId %u fails: %d\n", mtdNum, patchMetaHdrPtr->ubiVolId,
+                     res );
+            goto error;
+        }
+
+        *isFreePtr = !(patchMetaHdrPtr->ubiVolId > mtdInfoPtr->ubiVolFreeSize);
+
+        pa_flash_Close( desc );
+    }
+
+    return LE_OK;
+error:
+    if (desc)
+    {
+        pa_flash_Close( desc );
+    }
+    return LE_FAULT;
+}
+
 //==================================================================================================
 //  PUBLIC API FUNCTIONS
 //==================================================================================================
@@ -287,6 +358,20 @@ le_result_t deltaUpdate_ApplyPatch
         if (LE_OK != partition_CheckIfMounted( MtdDestNum ))
         {
             LE_ERROR("MTD %d is mounted", MtdDestNum);
+            goto error;
+        }
+
+        // check if image size is compliant with partition size
+        bool isFree;
+
+        if (LE_OK != IsFreeSpace(ctxPtr, MtdDestNum, IsDestLogical, IsDestDual, &isFree))
+        {
+            LE_ERROR("Unable to get free space");
+            goto error;
+        }
+        if (!isFree)
+        {
+            LE_ERROR("Destination is too small");
             goto error;
         }
 

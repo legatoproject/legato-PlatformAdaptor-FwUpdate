@@ -1046,6 +1046,12 @@ le_result_t partition_WriteUpdatePartition
             LE_ERROR("Fails to open MTD %d", mtdNum );
             return LE_FAULT;
         }
+        // check if the image size is compliant with partition size
+        if (hdrPtr->imageSize > FlashInfoPtr->size)
+        {
+            LE_ERROR("Image size (%d) > partition size (%d)", hdrPtr->imageSize, FlashInfoPtr->size);
+            goto error;
+        }
         if (LE_OK != pa_flash_Scan( MtdFd, NULL ))
         {
             LE_ERROR("Fails to scan MTD");

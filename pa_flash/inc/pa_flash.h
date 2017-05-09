@@ -113,16 +113,18 @@ pa_flash_LebToPeb_t;
 //--------------------------------------------------------------------------------------------------
 typedef struct
 {
-    uint32_t size;        ///< Total size of the partition, in bytes.
-    uint32_t writeSize;   ///< Minimal writable flash unit size i.e. min I/O size.
-    uint32_t eraseSize;   ///< Erase block size for the device.
-    uint32_t startOffset; ///< In case of logical partition, the offset in the physical partition
-    uint32_t nbBlk;       ///< number of physical blocks
-    uint32_t nbLeb;       ///< number of logical blocks (= nbBlk until pa_flash_Scan is called)
-    bool     logical;     ///< flag for logical partitions
-    bool     ubi;         ///< flag for UBI management on physical partition
+    uint32_t size;            ///< Total size of the partition, in bytes.
+    uint32_t writeSize;       ///< Minimal writable flash unit size i.e. min I/O size.
+    uint32_t eraseSize;       ///< Erase block size for the device.
+    uint32_t startOffset;     ///< In case of logical partition, the offset in the physical partition
+    uint32_t nbBlk;           ///< number of physical blocks
+    uint32_t nbLeb;           ///< number of logical blocks (= nbBlk until pa_flash_Scan is called)
+    bool     logical;         ///< flag for logical partitions
+    bool     ubi;             ///< flag for UBI management on physical partition
+    uint32_t ubiPebFreeCount; ///< Free UBI PEB counter, available only if ubi is true
+    size_t   ubiVolFreeSize;  ///< Free size for an UBI volume, available only if ubi is true
     char     name[PA_FLASH_MAX_INFO_NAME];
-                          ///< name of the partition
+                              ///< name of the partition
 }
 pa_flash_Info_t;
 

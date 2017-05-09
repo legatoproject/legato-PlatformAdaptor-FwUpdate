@@ -31,6 +31,7 @@ typedef struct
     struct ubi_vtbl_record vtbl[UBI_MAX_VOLUMES];     ///< Pointer to VTBL is UBI
     struct ubi_vtbl_record *vtblPtr;     ///< Pointer to VTBL is UBI
     uint32_t vtblPeb[2];     ///< PEB containing the VTBL if UBI
+    uint32_t ubiBadBlkCnt;   ///< counter of bad blocks
 }
 pa_flash_MtdDesc_t;
 
