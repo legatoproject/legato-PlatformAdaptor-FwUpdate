@@ -1587,6 +1587,24 @@ le_result_t pa_fwupdate_MarkGood
             LE_ERROR( "Unable to determine dual partition for %d", syncPartition[idx] );
             goto error;
         }
+
+        if (LE_OK != partition_CheckIfMounted( mtdDst ))
+        {
+            // CUST0 is expected to be managed by customer only. If it is mounted or attached,
+            // the synchronize will be skipped for this one.
+            if (CWE_IMAGE_TYPE_CUS0 == syncPartition[idx])
+            {
+                LE_WARN("Customer partition mtd%d is mounted or attached. Synchronize skipped.",
+                        mtdDst);
+                continue;
+            }
+            else
+            {
+                LE_ERROR("Partition mtd%d is mounted or attached. Synchronize aborted.", mtdDst);
+                goto error;
+            }
+        }
+
         LE_INFO( "Synchronizing %s partition \"%s%s\" (mtd%d) from \"%s%s\" (mtd%d)",
                  mtdDst == mtdSrc ? "logical" : "physical",
                  mtdDstNamePtr,
