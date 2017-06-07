@@ -186,5 +186,20 @@ LE_SHARED le_result_t pa_fwupdate_NvupDelete
     void
 );
 
+//--------------------------------------------------------------------------------------------------
+/**
+ * Write bad image flag preventing concurrent partition access
+ *
+ * @return
+ *      - LE_OK             on success
+ *      - LE_FAULT          on failure
+ */
+//--------------------------------------------------------------------------------------------------
+LE_SHARED le_result_t pa_fwupdate_SetBadImage
+(
+    uint64_t badImageMask,  ///< [IN] image to be written according to bitmask
+    bool isBad              ///< [IN] true to set bad image flag, false to clear it
+);
+
 #endif /* LEGATO_PASWUPDATEDUALSYS_INCLUDE_GUARD */
 

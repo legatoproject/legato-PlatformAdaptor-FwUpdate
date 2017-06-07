@@ -288,7 +288,22 @@ static le_result_t EraseResumeCtx
 )
 {
     int ret, i, j;
+    cwe_ImageType_t imageType;
     le_result_t result = LE_OK;
+
+    if (NULL == resumeCtxPtr)
+    {
+        LE_ERROR("resumeCtxPtr is NULL");
+        return LE_FAULT;
+    }
+
+    imageType = resumeCtxPtr->saveCtx.imageType;
+    // Clear bad image flag before erasing resumeCtx
+    result = partition_SetBadImage(imageType, false);
+    if (LE_OK != result)
+    {
+        LE_ERROR("Failed to clear bad image flag for CWE imageType %d", imageType);
+    }
 
     for (i = 2; i--;)
     {
@@ -866,6 +881,14 @@ static size_t WriteImageData
             }
             else
             {
+                // Clear bad image flag
+                if (LE_OK != partition_SetBadImage(cweHeaderPtr->imageType, false))
+                {
+                    LE_ERROR("Failed to clear bad image flag for CWE imageType %d",
+                             cweHeaderPtr->imageType);
+                    result = 0;
+                }
+
                 CurrentImageOffset = 0;
                 CurrentImageCrc32 = LE_CRC_START_CRC32;
                 // erase the path flag in options to allow new cwe header to be read

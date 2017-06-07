@@ -36,8 +36,9 @@ partition_Ctx_t;
 //--------------------------------------------------------------------------------------------------
 typedef struct
 {
-    char                  *namePtr[2]; // Name of partition in system 1 and 2
-    pa_fwupdate_SubSysId_t subSysId;   // Sub system containing these partitions
+    char                  *namePtr[2];       // Name of partition in system 1 and 2
+    pa_fwupdate_SubSysId_t subSysId;         // Sub system containing these partitions
+    uint64_t               badImageMask[2];  // Bitmask for partitions in bad image flag
 }
 partition_Identifier_t;
 
@@ -166,6 +167,21 @@ le_result_t partition_WriteUpdatePartition
     bool *isFlashedPtr                ///< [OUT] true if flash write was done
 );
 
+//--------------------------------------------------------------------------------------------------
+/**
+ * Set bad image flag preventing concurrent partition access
+ *
+ * @return
+ *      - LE_OK            The request was accepted
+ *      - LE_BAD_PARAMETER The parameter is invalid
+ *      - LE_FAULT         If an error occurs
+ */
+//--------------------------------------------------------------------------------------------------
+le_result_t partition_SetBadImage
+(
+    cwe_ImageType_t imageType,        ///< [IN] CWE image type to set/clear bad image flag for
+    bool isBad                        ///< [IN] True to set bad image flag, false to clear it
+);
 
 #endif /* LEGATO_PARTITONLOCAL_INCLUDE_GUARD */
 

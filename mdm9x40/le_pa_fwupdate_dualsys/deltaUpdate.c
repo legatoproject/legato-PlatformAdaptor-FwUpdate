@@ -375,6 +375,14 @@ le_result_t deltaUpdate_ApplyPatch
             goto error;
         }
 
+        // set bad image flag before applying patch
+        res = partition_SetBadImage(cweHdrPtr->imageType, true);
+        if (LE_OK != res)
+        {
+            LE_ERROR("Failed to set bad image flag for CWE imageType %d", cweHdrPtr->imageType);
+            goto error;
+        }
+
         // No patch in progress. This is a new patch
         PatchCrc32 = LE_CRC_START_CRC32;
 
@@ -413,7 +421,7 @@ le_result_t deltaUpdate_ApplyPatch
         {
             LE_CRIT("Cannot apply patch. Partition \"%s\" CRC32 does not match",
                     MtdNamePtr);
-            return LE_FAULT;
+            goto error;
         }
         else
         {
@@ -524,7 +532,8 @@ le_result_t deltaUpdate_ApplyPatch
             {
                 LE_CRIT("UBI Patch failed Partition %d (\"%s\") CRC32 does not match",
                         MtdDestNum, MtdNamePtr);
-                return LE_FAULT;
+                res = LE_FAULT;
+                goto error;
             }
         }
         else
@@ -540,8 +549,17 @@ le_result_t deltaUpdate_ApplyPatch
                 LE_CRIT("Patch failed Partition %d (\"%s\") CRC32 does not match",
                         MtdDestNum, MtdNamePtr);
                 res = LE_FAULT;
+                goto error;
             }
         }
+
+        // clear bad image flag
+        res = partition_SetBadImage(cweHdrPtr->imageType, false);
+        if (LE_OK != res)
+        {
+            LE_ERROR("Failed to clear bad image flag for CWE imageType %d", cweHdrPtr->imageType);
+        }
+
         LE_DEBUG( "CRC32: Expected 0x%X Patched 0x%X", patchMetaHdrPtr->destCrc32, PatchCrc32 );
         MtdDestNum = -1;
         MtdOrigNum = -1;

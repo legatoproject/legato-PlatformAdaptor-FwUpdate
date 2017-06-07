@@ -11,6 +11,7 @@
 #include "legato.h"
 #include "cwe_local.h"
 #include "partition_local.h"
+#include "pa_fwupdate_dualsys.h"
 #include "pa_flash.h"
 
 //--------------------------------------------------------------------------------------------------
@@ -49,6 +50,14 @@
 //--------------------------------------------------------------------------------------------------
 #define SBL_MAX_BASE_IN_FIRST_2MB  (2*1024*1024)
 
+//--------------------------------------------------------------------------------------------------
+/**
+ * Bit mask for undefined or not applicable bad image.
+ * This must be set to 0 in order to allow logical OR operations between bad image bit masks.
+ */
+//--------------------------------------------------------------------------------------------------
+#define BADIMG_NDEF 0x0
+
 //==================================================================================================
 //                                       Static variables
 //==================================================================================================
@@ -59,43 +68,43 @@
  */
 //--------------------------------------------------------------------------------------------------
 partition_Identifier_t Partition_Identifier[ CWE_IMAGE_TYPE_COUNT ] = {
-    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
-    { {   "sbl",          "sbl",         },   PA_FWUPDATE_SUBSYSID_MODEM },
-    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
-    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
-    { {   "modem",        "modem2",      },   PA_FWUPDATE_SUBSYSID_MODEM },
-    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
-    { {   "rpm",          "rpm",         },   PA_FWUPDATE_SUBSYSID_MODEM },
-    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
-    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
-    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
-    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
-    { {   "boot",         "boot2",       },   PA_FWUPDATE_SUBSYSID_LINUX },
-    { {   "aboot",        "aboot2",      },   PA_FWUPDATE_SUBSYSID_LK    },
-    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
-    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
-    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
-    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
-    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
-    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
-    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
-    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
-    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
-    { {   "system",       "system2",     },   PA_FWUPDATE_SUBSYSID_LINUX },
-    { {   "lefwkro",      "lefwkro2",    },   PA_FWUPDATE_SUBSYSID_LINUX },
-    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
-    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
-    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
-    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
-    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
-    { {   "tz",           "tz",          },   PA_FWUPDATE_SUBSYSID_MODEM },
-    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
-    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
-    { {   "userapp",      "userapp",     },   PA_FWUPDATE_SUBSYSID_LINUX  },
-    { {   NULL,           NULL,          },   PA_FWUPDATE_SUBSYSID_NONE  },
-    { {   "customer0",    "customer1",   },   PA_FWUPDATE_SUBSYSID_LINUX },
-    { {   "customer0",    "customer1",   },   PA_FWUPDATE_SUBSYSID_LINUX },
-    { {   "customer2",    "customer2",   },   PA_FWUPDATE_SUBSYSID_LINUX },
+    { { NULL,        NULL,        }, PA_FWUPDATE_SUBSYSID_NONE,  { BADIMG_NDEF, BADIMG_NDEF } },
+    { { "sbl",       "sbl",       }, PA_FWUPDATE_SUBSYSID_MODEM, { BADIMG_NDEF, BADIMG_NDEF } },
+    { { NULL,        NULL,        }, PA_FWUPDATE_SUBSYSID_NONE,  { BADIMG_NDEF, BADIMG_NDEF } },
+    { { NULL,        NULL,        }, PA_FWUPDATE_SUBSYSID_NONE,  { BADIMG_NDEF, BADIMG_NDEF } },
+    { { "modem",     "modem2",    }, PA_FWUPDATE_SUBSYSID_MODEM, { 0x000000200, 0x000000400 } },
+    { { NULL,        NULL,        }, PA_FWUPDATE_SUBSYSID_NONE,  { BADIMG_NDEF, BADIMG_NDEF } },
+    { { "rpm",       "rpm",       }, PA_FWUPDATE_SUBSYSID_MODEM, { 0x000000080, 0x000000100 } },
+    { { NULL,        NULL,        }, PA_FWUPDATE_SUBSYSID_NONE,  { BADIMG_NDEF, BADIMG_NDEF } },
+    { { NULL,        NULL,        }, PA_FWUPDATE_SUBSYSID_NONE,  { BADIMG_NDEF, BADIMG_NDEF } },
+    { { NULL,        NULL,        }, PA_FWUPDATE_SUBSYSID_NONE,  { BADIMG_NDEF, BADIMG_NDEF } },
+    { { NULL,        NULL,        }, PA_FWUPDATE_SUBSYSID_NONE,  { BADIMG_NDEF, BADIMG_NDEF } },
+    { { "boot",      "boot2",     }, PA_FWUPDATE_SUBSYSID_LINUX, { 0x000002000, 0x000004000 } },
+    { { "aboot",     "aboot2",    }, PA_FWUPDATE_SUBSYSID_LK,    { 0x000000800, 0x000001000 } },
+    { { NULL,        NULL,        }, PA_FWUPDATE_SUBSYSID_NONE,  { BADIMG_NDEF, BADIMG_NDEF } },
+    { { NULL,        NULL,        }, PA_FWUPDATE_SUBSYSID_NONE,  { BADIMG_NDEF, BADIMG_NDEF } },
+    { { NULL,        NULL,        }, PA_FWUPDATE_SUBSYSID_NONE,  { BADIMG_NDEF, BADIMG_NDEF } },
+    { { NULL,        NULL,        }, PA_FWUPDATE_SUBSYSID_NONE,  { BADIMG_NDEF, BADIMG_NDEF } },
+    { { NULL,        NULL,        }, PA_FWUPDATE_SUBSYSID_NONE,  { BADIMG_NDEF, BADIMG_NDEF } },
+    { { NULL,        NULL,        }, PA_FWUPDATE_SUBSYSID_NONE,  { BADIMG_NDEF, BADIMG_NDEF } },
+    { { NULL,        NULL,        }, PA_FWUPDATE_SUBSYSID_NONE,  { BADIMG_NDEF, BADIMG_NDEF } },
+    { { NULL,        NULL,        }, PA_FWUPDATE_SUBSYSID_NONE,  { BADIMG_NDEF, BADIMG_NDEF } },
+    { { NULL,        NULL,        }, PA_FWUPDATE_SUBSYSID_NONE,  { BADIMG_NDEF, BADIMG_NDEF } },
+    { { "system",    "system2",   }, PA_FWUPDATE_SUBSYSID_LINUX, { 0x000008000, 0x000010000 } },
+    { { "lefwkro",   "lefwkro2",  }, PA_FWUPDATE_SUBSYSID_LINUX, { 0x000020000, 0x000040000 } },
+    { { NULL,        NULL,        }, PA_FWUPDATE_SUBSYSID_NONE,  { BADIMG_NDEF, BADIMG_NDEF } },
+    { { NULL,        NULL,        }, PA_FWUPDATE_SUBSYSID_NONE,  { BADIMG_NDEF, BADIMG_NDEF } },
+    { { NULL,        NULL,        }, PA_FWUPDATE_SUBSYSID_NONE,  { BADIMG_NDEF, BADIMG_NDEF } },
+    { { NULL,        NULL,        }, PA_FWUPDATE_SUBSYSID_NONE,  { BADIMG_NDEF, BADIMG_NDEF } },
+    { { NULL,        NULL,        }, PA_FWUPDATE_SUBSYSID_NONE,  { BADIMG_NDEF, BADIMG_NDEF } },
+    { { "tz",        "tz",        }, PA_FWUPDATE_SUBSYSID_MODEM, { 0x000000020, 0x000000040 } },
+    { { NULL,        NULL,        }, PA_FWUPDATE_SUBSYSID_NONE,  { BADIMG_NDEF, BADIMG_NDEF } },
+    { { NULL,        NULL,        }, PA_FWUPDATE_SUBSYSID_NONE,  { BADIMG_NDEF, BADIMG_NDEF } },
+    { { "userapp",   "userapp",   }, PA_FWUPDATE_SUBSYSID_LINUX, { BADIMG_NDEF, BADIMG_NDEF } },
+    { { NULL,        NULL,        }, PA_FWUPDATE_SUBSYSID_NONE,  { BADIMG_NDEF, BADIMG_NDEF } },
+    { { "customer0", "customer1", }, PA_FWUPDATE_SUBSYSID_LINUX, { BADIMG_NDEF, BADIMG_NDEF } },
+    { { "customer0", "customer1", }, PA_FWUPDATE_SUBSYSID_LINUX, { BADIMG_NDEF, BADIMG_NDEF } },
+    { { "customer2", "customer2", }, PA_FWUPDATE_SUBSYSID_LINUX, { BADIMG_NDEF, BADIMG_NDEF } },
 };
 
 //--------------------------------------------------------------------------------------------------
@@ -1101,6 +1110,15 @@ le_result_t partition_WriteUpdatePartition
             LE_ERROR("Fails to scan MTD");
             goto error;
         }
+
+        // Set bad image flag before writing to partition
+        res = partition_SetBadImage(hdrPtr->imageType, true);
+        if (LE_OK != res)
+        {
+            LE_ERROR("Failed to set bad image flag for CWE imageType %d", hdrPtr->imageType);
+            goto error;
+        }
+
         for (iblk = offset / FlashInfoPtr->eraseSize; iblk < FlashInfoPtr->nbLeb; iblk++)
         {
             bool isBad;
@@ -1226,3 +1244,101 @@ error:
 }
 
 
+//--------------------------------------------------------------------------------------------------
+/**
+ * Get bad image bitmask value
+ *
+ * @return
+ *      - LE_OK            The request was accepted
+ *      - LE_BAD_PARAMETER The parameter is invalid
+ *      - LE_FAULT         If an error occurs
+ */
+//--------------------------------------------------------------------------------------------------
+static le_result_t partition_GetBadImageMask
+(
+    cwe_ImageType_t imageType,        ///< [IN] CWE image type to get bitmask for
+    uint64_t* badImageMaskPtr         ///< [OUT] Pointer to bad image bitmask
+)
+{
+    uint8_t systemArray[PA_FWUPDATE_SUBSYSID_MAX];
+    pa_fwupdate_SubSysId_t subSysId;
+    uint8_t partSystem;
+
+    // Default value until valid mask is found
+    *badImageMaskPtr = BADIMG_NDEF;
+
+    if ((CWE_IMAGE_TYPE_MIN >= imageType) || (CWE_IMAGE_TYPE_MAX <= imageType))
+    {
+        LE_ERROR("Invalid CWE imageType %d", imageType);
+        return LE_BAD_PARAMETER;
+    }
+
+    subSysId = Partition_Identifier[imageType].subSysId;
+    if ((PA_FWUPDATE_SUBSYSID_NONE >= subSysId) ||
+        (PA_FWUPDATE_SUBSYSID_MAX <= subSysId))
+    {
+        LE_ERROR("Undefined partition for subSysId %d", subSysId);
+        return LE_BAD_PARAMETER;
+    }
+
+    if (LE_OK != partition_GetInitialBootSystem(systemArray))
+    {
+        LE_ERROR("Failed to get initial boot system");
+        return LE_FAULT;
+    }
+
+    // Get mask for UPDATE system partition
+    partSystem = !systemArray[subSysId];
+
+    *badImageMaskPtr = Partition_Identifier[imageType].badImageMask[partSystem];
+    if (BADIMG_NDEF == *badImageMaskPtr)
+    {
+        LE_WARN("Undefined badImageMask for CWE imageType %d", imageType);
+    }
+
+    return LE_OK;
+}
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Set bad image flag preventing concurrent partition access
+ *
+ * @return
+ *      - LE_OK            The request was accepted
+ *      - LE_BAD_PARAMETER The parameter is invalid
+ *      - LE_FAULT         If an error occurs
+ */
+//--------------------------------------------------------------------------------------------------
+le_result_t partition_SetBadImage
+(
+    cwe_ImageType_t imageType,        ///< [IN] CWE image type to set/clear bad image flag for
+    bool isBad                        ///< [IN] True to set bad image flag, false to clear it
+)
+{
+    le_result_t res;
+    uint64_t badImageMask = BADIMG_NDEF;
+
+    res = partition_GetBadImageMask(imageType, &badImageMask);
+    if (LE_OK != res)
+    {
+        LE_ERROR("Unable to get bad image mask for CWE image %d (ret %d)", imageType, res);
+        return res;
+    }
+
+    if (BADIMG_NDEF != badImageMask)
+    {
+        // Set/Clear bad image flag on UPDATE partition
+        res = pa_fwupdate_SetBadImage(badImageMask, isBad);
+        if (LE_OK != res)
+        {
+            LE_ERROR("Unable to %s bad image 0x%llx", isBad ? "set":"clear", badImageMask);
+            return LE_FAULT;
+        }
+    }
+    else
+    {
+        LE_WARN("Bad image flag is not applicable to CWE imageType %d", imageType);
+    }
+
+    return LE_OK;
+}
