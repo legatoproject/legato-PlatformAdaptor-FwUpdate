@@ -188,6 +188,13 @@ static partition_Ctx_t PartitionCtx = {
     .flashPoolPtr = &FlashImgPool
 };
 
+//--------------------------------------------------------------------------------------------------
+/**
+ * Disable check of sync before update (default false)
+ */
+//--------------------------------------------------------------------------------------------------
+static bool IsSyncBeforeUpdateDisabled = false;
+
 //==================================================================================================
 //                                       Private Functions
 //==================================================================================================
@@ -838,8 +845,11 @@ static size_t WriteImageData
         /* Check if it's the 1st data write for this package */
         if ((false == IsFirstDataWritten) && isFlashed)
         {
-            /* Update the partition synchronization state */
-            pa_fwupdate_SetUnsyncState();
+            if (false == IsSyncBeforeUpdateDisabled)
+            {
+                /* Update the partition synchronization state */
+                pa_fwupdate_SetUnsyncState();
+            }
             IsFirstDataWritten = true;
         }
 
@@ -1829,7 +1839,7 @@ le_result_t pa_fwupdate_Download
 
         // Get the systems synchronization state
         result = pa_fwupdate_GetSystemState (&bSync);
-        if ((LE_OK == result) && (false == bSync))
+        if ((LE_OK == result) && ((false == bSync) && (false == IsSyncBeforeUpdateDisabled)))
         {
             /* Both systems are not synchronized
              * It's not possible to launch a new package download
@@ -2165,7 +2175,7 @@ le_result_t pa_fwupdate_InitDownload
         LE_ERROR("Checking synchronization has failed (%s)!", LE_RESULT_TXT(result));
         return LE_FAULT;
     }
-    else if (false == isSystemGood)
+    else if ((false == isSystemGood) && (false == IsSyncBeforeUpdateDisabled))
     {
         // Perform the synchronization
         result = pa_fwupdate_MarkGood();
@@ -2299,6 +2309,39 @@ le_result_t pa_fwupdate_GetUpdateStatus
     }
 
     return result;
+}
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Disable (true) or enable (false) the synchronisation check before performing an update.
+ * The default behavior at startup is always to have the check enabled. It remains enabled
+ * until this service is called with the value true. To re-enable the synchronization check
+ * call this service with the value false.
+ *
+ * @note Upgrading some partitions without performing a sync before may let the whole system
+ *       into a unworkable state. THIS IS THE RESPONSABILITY OF THE CALLER TO KNOW WHAT IMAGES
+ *       ARE ALREADY FLASHED INTO THE UPDATE SYSTEM.
+ *
+ * @return
+ *      - LE_OK              On success
+ *      - LE_UNSUPPORTED     The feature is not supported
+ *      - LE_FAULT           On failure
+ */
+//--------------------------------------------------------------------------------------------------
+le_result_t pa_fwupdate_DisableSyncBeforeUpdate
+(
+    bool isDisabled  ///< [IN] State of sync check : true (disable) or false (enable)
+)
+{
+    IsSyncBeforeUpdateDisabled = isDisabled;
+    LE_DEBUG("Sync before update is %sabled", IsSyncBeforeUpdateDisabled ? "dis" : "en");
+    if (true == IsSyncBeforeUpdateDisabled)
+    {
+        LE_WARN("Sync before update is now DISABLED. Updating without performing a sync before");
+        LE_WARN("let the system into a unworkable state !");
+
+    }
+    return LE_OK;
 }
 
 //--------------------------------------------------------------------------------------------------
