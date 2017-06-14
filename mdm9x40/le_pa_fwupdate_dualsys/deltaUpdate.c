@@ -461,8 +461,10 @@ le_result_t deltaUpdate_ApplyPatch
     // Patch is complete. So apply it using bspatch
     if (0 == *patchRemLenPtr)
     {
+        pa_flash_Desc_t desc;
         pa_patch_Context_t ctx;
         le_result_t res;
+        bool isUbi = false, isGood;
 
         close(PatchFd);
         PatchFd = -1;
@@ -485,6 +487,7 @@ le_result_t deltaUpdate_ApplyPatch
         {
             ctx.origImage = PA_PATCH_IMAGE_UBIFLASH;
             ctx.destImage = PA_PATCH_IMAGE_UBIFLASH;
+            isUbi = true;
         }
         ctx.origImageSize = patchMetaHdrPtr->origSize;
         ctx.origImageCrc32 = patchMetaHdrPtr->origCrc32;
@@ -499,12 +502,64 @@ le_result_t deltaUpdate_ApplyPatch
         ctx.destImageDesc.flash.isLogical = IsDestLogical;
         ctx.destImageDesc.flash.isDual = IsDestDual;
 
+        if (isUbi)
+        {
+             if (LE_OK != pa_flash_Open( MtdOrigNum,
+                                         PA_FLASH_OPENMODE_READONLY |
+                                         (IsOrigLogical
+                                          ? (IsOrigDual ? PA_FLASH_OPENMODE_LOGICAL_DUAL
+                                             : PA_FLASH_OPENMODE_LOGICAL)
+                                          : 0),
+                                         &desc,
+                                         NULL ))
+             {
+                 goto error;
+             }
+             // Try to check the integrity of UBI. At the first call, just register the EC values
+             // If the MTD does not refer to an UBI, LE_FORMAT_ERROR is reported.
+             res = pa_flash_CheckUbiIntegrity( desc, &isGood );
+             if ((LE_OK != res) || (!isGood))
+             {
+                 LE_ERROR("Failed to check UBI integrity MTD %d", MtdOrigNum);
+                 pa_flash_Close(desc);
+                 goto error;
+             }
+        }
         res = bsPatch( &ctx,
                        TMP_PATCH_PATH,
                        &PatchCrc32,
                        patchMetaHdrPtr->numPatches == patchHdrPtr->number,
                        false);
         unlink(TMP_PATCH_PATH);
+        if (LE_OK == res)
+        {
+            if (isUbi)
+            {
+                // Try to check the integrity of UBI.
+                // If an external write access is detected on the UBI container, isGood is set
+                // to false.
+                res = pa_flash_CheckUbiIntegrity( desc, &isGood );
+                if ((LE_OK == res) && (!isGood))
+                {
+                    // In this case, we need to recompute the checksum of the MTD to ensure that
+                    // it is conform to what we read during the patch.
+                    LE_ERROR("UBI uncontrolled write access. Recompute checksum");
+                    res = CheckUbiData( MtdOrigNum,
+                                        patchMetaHdrPtr->ubiVolId,
+                                        patchMetaHdrPtr->origSize,
+                                        patchMetaHdrPtr->origCrc32,
+                                        *ctxPtr->poolPtr );
+                    if (LE_OK != res)
+                    {
+                        LE_CRIT("Cannot apply patch. MTD %d is not conform", MtdOrigNum);
+                    }
+                }
+            }
+        }
+        if (isUbi)
+        {
+            pa_flash_Close(desc);
+        }
         if (LE_OK != res)
         {
             goto error;

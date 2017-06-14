@@ -1564,7 +1564,7 @@ le_result_t pa_fwupdate_MarkGood
     char* mtdDstNamePtr;
     uint8_t* flashBlockPtr = NULL;
     uint32_t crc32Src;
-    bool isLogicalSrc, isLogicalDst, isDualSrc, isDualDst;
+    bool isLogicalSrc, isLogicalDst, isDualSrc, isDualDst, isGood;
     pa_fwupdate_InternalStatus_t internalUpdateStatus;
     le_result_t res;
 
@@ -1671,6 +1671,16 @@ le_result_t pa_fwupdate_MarkGood
             LE_ERROR("Open of SRC MTD %d fails", mtdSrc);
             goto error;
         }
+
+        // Try to check the integrity of UBI. At the first call, just register the EC values
+        // If the MTD does not refer to an UBI, LE_FORMAT_ERROR is reported.
+        res = pa_flash_CheckUbiIntegrity( flashFdSrc, &isGood );
+        if( (!((LE_OK == res) && (isGood))) && (LE_FORMAT_ERROR != res) )
+        {
+            LE_ERROR("IsUbi of SRC MTD %d fails: res=%d", mtdSrc, res);
+            goto error;
+        }
+
         if ( LE_OK != pa_flash_Open( mtdDst,
                                      PA_FLASH_OPENMODE_WRITEONLY | PA_FLASH_OPENMODE_MARKBAD |
                                      (isLogicalDst
@@ -1760,6 +1770,29 @@ le_result_t pa_fwupdate_MarkGood
         }
 
         srcSize = nbSrcBlkCnt * flashInfoSrcPtr->eraseSize;
+        // Try to check the integrity of UBI.
+        // If the MTD does not refer to an UBI, LE_FORMAT_ERROR is reported.
+        // If an external write access is detected on the UBI container, isGood is set to false.
+        res = pa_flash_CheckUbiIntegrity( flashFdSrc, &isGood );
+        if( (LE_OK == res) && (!isGood) )
+        {
+            // In this case, we need to recompute the checksum of the MTD to ensure that it is
+            // conform to what we read first.
+            LE_WARN("UBI uncontrolled write performed to MTD %d. Recompute the checksum", mtdSrc);
+            if (LE_OK != partition_CheckData(mtdSrc, isLogicalSrc, isDualSrc, srcSize, 0,
+                                             crc32Src, FlashImgPool))
+            {
+                LE_ERROR("Checksum failed after rereading source MTD %d", mtdSrc);
+                goto error;
+            }
+            res = LE_OK;
+        }
+        if( (LE_OK != res) && (LE_FORMAT_ERROR != res) )
+        {
+            // The UBI integrity is corrupt.
+            LE_ERROR("IsUbi of SRC MTD %d fails: res=%d", mtdSrc, res);
+            goto error;
+        }
         pa_flash_Close(flashFdSrc);
         flashFdSrc = NULL;
         pa_flash_Close(flashFdDst);

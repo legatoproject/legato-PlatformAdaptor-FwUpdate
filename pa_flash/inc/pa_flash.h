@@ -123,6 +123,9 @@ typedef struct
     bool     ubi;             ///< flag for UBI management on physical partition
     uint32_t ubiPebFreeCount; ///< Free UBI PEB counter, available only if ubi is true
     size_t   ubiVolFreeSize;  ///< Free size for an UBI volume, available only if ubi is true
+    uint64_t ubiMinEraseCount;///< Minimum Erase Counter on all PEB belonging to the UBI partition
+    uint64_t ubiMaxEraseCount;///< Maximum Erase Counter on all PEB belonging to the UBI partition
+    uint32_t ubiWlThreshold;  ///< Wear-Leveling threshold for the UBI partition
     char     name[PA_FLASH_MAX_INFO_NAME];
                               ///< name of the partition
 }
@@ -431,6 +434,33 @@ le_result_t pa_flash_WriteAtBlock
     uint32_t blockIndex,      ///< [IN] PEB or LEB to write
     uint8_t *dataPtr,         ///< [IN] Pointer to data to be written
     size_t dataSize           ///< [IN] Size of data to write
+);
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Check if the UBI partition was externally modified since it was opened. At the first call, update
+ * the Erase Counter (EC) min and max values. This may be also done by calling pa_flash_ScanUbi().
+ * At the next calls, verify that the EC values are these expected: return true into the isGoodPtr
+ * if the integrity of the UBI partition is good. Else, this parameter is returned to false.
+ *
+ * The integrity is controlled by comparing the previous and current max and min EC values. If they
+ * differ, it is that an external update of EC was done outside the PA, because the PA will update
+ * these values.
+ * In a same way, if the wear-leveling threshold is greater than max EC - min EC, we considere that
+ * potentially the wear-leveling will be triggered by UBI layers.
+ *
+ * @return
+ *      - LE_OK            On success
+ *      - LE_BAD_PARAMETER If desc is NULL or is not a valid descriptor
+ *      - LE_FAULT         On failure
+ *      - LE_IO_ERROR      If a flash IO error occurs
+ *      - LE_FORMAT_ERROR  If the flash is not in UBI format
+ */
+//--------------------------------------------------------------------------------------------------
+le_result_t pa_flash_CheckUbiIntegrity
+(
+    pa_flash_Desc_t desc,        ///< [IN]  Private flash descriptor
+    bool *isGoodPtr              ///< [OUT] true if integrity is good, false otherwise
 );
 
 //--------------------------------------------------------------------------------------------------

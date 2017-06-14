@@ -13,6 +13,22 @@
 #include "pa_flash.h"
 #include "pa_flash_local.h"
 
+// Need some internal config values from the kernel configuration
+// Because there is no entry in /sys or /proc to read these values
+#include <linux/../../src/kernel/include/generated/autoconf.h>
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Wear-Leveling threshold: when (max - min) erase counter is greater than this threshold, UBI will
+ * perform wear-leveling on the block.
+ */
+//--------------------------------------------------------------------------------------------------
+#ifdef CONFIG_MTD_UBI_WL_THRESHOLD
+#define WL_THRESHOLD CONFIG_MTD_UBI_WL_THRESHOLD
+#else
+#define WL_THRESHOLD UINT_MAX
+#endif
+
 //--------------------------------------------------------------------------------------------------
 /**
  * Setting the invalidity of the PEB (valid values from 0 to N)
@@ -194,6 +210,7 @@ static le_result_t GetNewBlock
 //--------------------------------------------------------------------------------------------------
 static void UpdateEraseCounter
 (
+    pa_flash_MtdDesc_t *descPtr,          ///< [IN] Private flash descriptor
     struct ubi_ec_hdr* ecHdrPtr,          ///< [IN] Pointer to a UBI EC header
     uint64_t*          meanEraseCountPtr  ///< [IN][OUT] Pointer the mean of EC count
 )
@@ -208,7 +225,15 @@ static void UpdateEraseCounter
     }
     if( meanEraseCountPtr )
     {
-        (*meanEraseCountPtr) += ec;
+        (*meanEraseCountPtr) = (*meanEraseCountPtr + ec) / 2;
+    }
+    if( descPtr->mtdInfo.ubiMinEraseCount > ec )
+    {
+        descPtr->mtdInfo.ubiMinEraseCount = ec;
+    }
+    if( descPtr->mtdInfo.ubiMaxEraseCount < ec )
+    {
+        descPtr->mtdInfo.ubiMaxEraseCount = ec;
     }
     ecHdrPtr->ec = htobe64(ec);
     crc = le_crc_Crc32( (uint8_t *)ecHdrPtr, UBI_EC_HDR_SIZE_CRC, LE_CRC_START_CRC32 );
@@ -289,7 +314,7 @@ static le_result_t UpdateAllVidBlock
             }
 
             ecHdrPtr = (struct ubi_ec_hdr *)blockPtr;
-            UpdateEraseCounter( ecHdrPtr, meanEraseCountPtr );
+            UpdateEraseCounter( descPtr, ecHdrPtr, meanEraseCountPtr );
             vidHdrPtr = (struct ubi_vid_hdr *)(blockPtr + be32toh(ecHdrPtr->vid_hdr_offset));
             UpdateReservedPebs( vidHdrPtr, reservedPebs );
             LE_DEBUG("Update VID Header at %lx: used_ebs %x, hdr_crc %x",
@@ -325,7 +350,7 @@ static le_result_t UpdateAllVidBlock
         {
             return res;
         }
-        UpdateEraseCounter( (struct ubi_ec_hdr *)blockPtr, NULL );
+        UpdateEraseCounter( descPtr, (struct ubi_ec_hdr *)blockPtr, NULL );
         res = pa_flash_EraseBlock( desc, blkOff / descPtr->mtdInfo.eraseSize );
         if (LE_OK != res)
         {
@@ -394,7 +419,7 @@ static le_result_t UpdateVtbl
             return res;
         }
         ecHdrPtr = (struct ubi_ec_hdr *)blockPtr;
-        UpdateEraseCounter( ecHdrPtr, NULL );
+        UpdateEraseCounter( descPtr, ecHdrPtr, NULL );
         vtblPtr = (struct ubi_vtbl_record *)(blockPtr + be32toh(ecHdrPtr->data_offset));
         vtblPtr[descPtr->ubiVolumeId].reserved_pebs = htobe32(reservedPebs);
         crc = le_crc_Crc32( (uint8_t *)&vtblPtr[descPtr->ubiVolumeId],
@@ -431,6 +456,8 @@ static le_result_t UpdateVtbl
  * @return
  *      - LE_OK            On success
  *      - LE_FAULT         On failure
+ *      - LE_FORMAT_ERROR  The block is erased
+ *      - LE_UNSUPPORTED   UBI magic not correct, this is not a UBI EC block
  *      - others           Depending of the flash operations
  */
 //--------------------------------------------------------------------------------------------------
@@ -438,12 +465,15 @@ static le_result_t ReadEcHeader
 (
     pa_flash_Desc_t    desc,            ///< [IN] File descriptor to the flash device
     off_t              physEraseBlock,  ///< [IN] Physical erase block (PEB) to read
-    struct ubi_ec_hdr* ecHeaderPtr      ///< [IN] Buffer to store read data
+    struct ubi_ec_hdr* ecHeaderPtr,     ///< [IN] Buffer to store read data
+    bool               isNoWarn         ///< [IN] true is no warning are requested
 )
 {
+    pa_flash_MtdDesc_t *descPtr = (pa_flash_MtdDesc_t *)desc;
     le_result_t res;
     uint32_t crc;
     int i;
+    uint64_t ec;
 
     res = pa_flash_SeekAtOffset( desc, physEraseBlock );
     if( LE_OK != res )
@@ -466,9 +496,12 @@ static le_result_t ReadEcHeader
 
     if ((uint32_t)UBI_EC_HDR_MAGIC != be32toh(ecHeaderPtr->magic))
     {
-        LE_ERROR( "Bad magic at %lx: Expected %x, received %x",
-                  physEraseBlock, UBI_EC_HDR_MAGIC, be32toh(ecHeaderPtr->magic));
-        return LE_FAULT;
+        if (!isNoWarn)
+        {
+            LE_ERROR( "Bad magic at %lx: Expected %x, received %x",
+                      physEraseBlock, UBI_EC_HDR_MAGIC, be32toh(ecHeaderPtr->magic));
+        }
+        return LE_UNSUPPORTED;
     }
 
     if (UBI_VERSION != ecHeaderPtr->version)
@@ -486,13 +519,24 @@ static le_result_t ReadEcHeader
         return LE_FAULT;
     }
 
-    LE_DEBUG("PEB %lx : MAGIC %c%c%c%c, EC %lld, VID %x DATA %x CRC %x",
+    ec = be64toh(ecHeaderPtr->ec);
+    if( descPtr->mtdInfo.ubiMinEraseCount > ec )
+    {
+        descPtr->mtdInfo.ubiMinEraseCount = ec;
+    }
+    if( descPtr->mtdInfo.ubiMaxEraseCount < ec )
+    {
+        descPtr->mtdInfo.ubiMaxEraseCount = ec;
+    }
+    LE_DEBUG("PEB %lx : MAGIC %c%c%c%c, EC %lld (min %lld max %lld), VID %x DATA %x CRC %x",
              physEraseBlock,
              ((char *)&(ecHeaderPtr->magic))[0],
              ((char *)&(ecHeaderPtr->magic))[1],
              ((char *)&(ecHeaderPtr->magic))[2],
              ((char *)&(ecHeaderPtr->magic))[3],
              be64toh(ecHeaderPtr->ec),
+             descPtr->mtdInfo.ubiMinEraseCount,
+             descPtr->mtdInfo.ubiMaxEraseCount,
              be32toh(ecHeaderPtr->vid_hdr_offset),
              be32toh(ecHeaderPtr->data_offset),
              be32toh(ecHeaderPtr->hdr_crc));
@@ -652,6 +696,122 @@ static le_result_t ReadVtbl
 
 //--------------------------------------------------------------------------------------------------
 /**
+ * Check if the UBI partition was externally modified since it was opened. At the first call, update
+ * the Erase Counter (EC) min and max values. This may be also done by calling pa_flash_ScanUbi().
+ * At the next calls, verify that the EC values are these expected: return true into the isGoodPtr
+ * if the integrity of the UBI partition is good. Else, this parameter is returned to false.
+ *
+ * The integrity is controlled by comparing the previous and current max and min EC values. If they
+ * differ, it is that an external update of EC was done outside the PA, because the PA will update
+ * these values.
+ * In a same way, if the wear-leveling threshold is greater than max EC - min EC, we considere that
+ * potentially the wear-leveling will be triggered by UBI layers.
+ *
+ * @return
+ *      - LE_OK            On success
+ *      - LE_BAD_PARAMETER If desc is NULL or is not a valid descriptor
+ *      - LE_FAULT         On failure
+ *      - LE_IO_ERROR      If a flash IO error occurs
+ *      - LE_FORMAT_ERROR  If the flash is not in UBI format
+ */
+//--------------------------------------------------------------------------------------------------
+le_result_t pa_flash_CheckUbiIntegrity
+(
+    pa_flash_Desc_t desc,        ///< [IN]  Private flash descriptor
+    bool *isGoodPtr              ///< [OUT] true if integrity is good, false otherwise
+)
+{
+    pa_flash_MtdDesc_t *descPtr = (pa_flash_MtdDesc_t *)desc;
+    pa_flash_MtdDesc_t descTemp;
+    pa_flash_Desc_t descTempPtr = (pa_flash_Desc_t)&descTemp;
+    uint32_t peb;
+    struct ubi_ec_hdr ecHeader;
+    off_t pebOffset;
+    bool isBad;
+    le_result_t res;
+    pa_flash_Info_t *infoPtr = &(descPtr->mtdInfo);
+    pa_flash_Info_t *infoTempPtr = &(descTemp.mtdInfo);
+
+    if( (!descPtr) || (descPtr->magic != desc) || (!isGoodPtr) )
+    {
+        return LE_BAD_PARAMETER;
+    }
+
+    *isGoodPtr = false;
+    memcpy(&descTemp, descPtr, sizeof(descTemp));
+    descTemp.magic = &descTemp;
+    for( peb = 0; peb < infoPtr->nbBlk; peb++ )
+    {
+        LE_DEBUG("Check if bad block at peb %u", peb);
+        res = pa_flash_CheckBadBlock( descTempPtr, peb, &isBad );
+        if( LE_OK != res )
+        {
+            goto error;
+        }
+        if (isBad)
+        {
+            LE_WARN("Skipping bad block %d", peb);
+            continue;
+        }
+
+        pebOffset = peb * infoPtr->eraseSize;
+        res = ReadEcHeader( descTempPtr, pebOffset, &ecHeader, true );
+        if (LE_FORMAT_ERROR == res)
+        {
+            // If the block is erased, continue the scan
+            continue;
+        }
+        else if (LE_UNSUPPORTED == res)
+        {
+            // If the block has a bad magic, it does not belong to an UBI
+            LE_DEBUG("MTD %d is NOT an UBI container", descPtr->mtdNum);
+            // Not an UBI container.
+            return LE_FORMAT_ERROR;
+        }
+        else if (LE_OK != res )
+        {
+            goto error;
+        }
+    }
+
+    *isGoodPtr = true;
+    if( !infoPtr->ubi )
+    {
+        // First call of this service for a partition. Just update the min and max EC
+        // This is also filled when pa_flash_ScanUbi() is called.
+        infoPtr->ubiMinEraseCount = infoTempPtr->ubiMinEraseCount;
+        infoPtr->ubiMaxEraseCount = infoTempPtr->ubiMaxEraseCount;
+        infoPtr->ubiWlThreshold = WL_THRESHOLD;
+        infoPtr->ubi = true;
+        // No check to do for the first call.
+        return LE_OK;
+    }
+
+    // If wear-leveling threshold is over EC (max - min), the UBI layer may have start
+    // the wear-leveling mechanism on this partition.
+    // If the EC max or EC min have changed during the copy, the UBI layer may have
+    // performed a scrubbing on this partition.
+    // If a case above is true, we recompute the checksum to ensure that the source
+    // was not modified by the UBI layer during the copy.
+    if( ((infoTempPtr->ubiMaxEraseCount - infoTempPtr->ubiMinEraseCount) >= WL_THRESHOLD) ||
+        ((infoTempPtr->ubiMaxEraseCount != infoPtr->ubiMaxEraseCount) ||
+         (infoTempPtr->ubiMinEraseCount != infoPtr->ubiMinEraseCount)) )
+    {
+        LE_ERROR("MTD %d was modified outside PA UBI", descPtr->mtdNum);
+        LE_ERROR("Open   : Min EC %lld Max EC %lld WL threshold %u",
+                 infoPtr->ubiMinEraseCount, infoPtr->ubiMaxEraseCount, WL_THRESHOLD);
+        LE_ERROR("Checked: Min EC %lld Max EC %lld WL threshold %u",
+                 infoTempPtr->ubiMinEraseCount, infoTempPtr->ubiMaxEraseCount, WL_THRESHOLD);
+        *isGoodPtr = false;
+    }
+    return LE_OK;
+
+error:
+    return LE_FAULT;
+}
+
+//--------------------------------------------------------------------------------------------------
+/**
  * Scan a partition for the UBI volume ID given. Update the LebToPeb array field with LEB for this
  * volume ID.
  *
@@ -691,6 +851,9 @@ le_result_t pa_flash_ScanUbi
     infoPtr->ubi = false;
     infoPtr->ubiPebFreeCount = 0;
     infoPtr->ubiVolFreeSize = 0;
+    infoPtr->ubiMinEraseCount = 0;
+    infoPtr->ubiMaxEraseCount = 0;
+    infoPtr->ubiWlThreshold = 0;
     descPtr->ubiVolumeId = INVALID_UBI_VOLUME;
     memset( descPtr->vtbl, 0, sizeof(struct ubi_vtbl_record) * PA_FLASH_UBI_MAX_VOLUMES);
     memset( descPtr->vtblPeb, -1, sizeof(descPtr->vtblPeb));
@@ -712,7 +875,7 @@ le_result_t pa_flash_ScanUbi
         }
 
         pebOffset = peb * infoPtr->eraseSize;
-        res = ReadEcHeader( descPtr, pebOffset, &ecHeader );
+        res = ReadEcHeader( descPtr, pebOffset, &ecHeader, false );
         if (LE_FORMAT_ERROR == res )
         {
             infoPtr->ubiPebFreeCount++;
@@ -794,6 +957,7 @@ le_result_t pa_flash_ScanUbi
         }
     }
     infoPtr->ubi = true;
+    descPtr->mtdInfo.ubiWlThreshold = WL_THRESHOLD;
     descPtr->ubiVolumeId = ubiVolId;
     return LE_OK;
 
@@ -833,6 +997,9 @@ le_result_t pa_flash_UnscanUbi
     memset( descPtr->lebToPeb, -1, sizeof(descPtr->lebToPeb));
     infoPtr->ubiPebFreeCount = 0;
     infoPtr->ubiVolFreeSize = 0;
+    infoPtr->ubiMinEraseCount = 0;
+    infoPtr->ubiMaxEraseCount = 0;
+    infoPtr->ubiWlThreshold = 0;
     return LE_OK;
 }
 
@@ -1081,7 +1248,7 @@ le_result_t pa_flash_WriteUbiAtBlock
     {
         uint32_t newBlk;
 
-        eraseCount = 0x7FFFFFFF;
+        eraseCount = INT_MAX;
         res = GetNewBlock( desc, blockPtr, &eraseCount, &newBlk );
         if( LE_OK != res )
         {
@@ -1157,7 +1324,7 @@ le_result_t pa_flash_WriteUbiAtBlock
     ecHdrPtr = (struct ubi_ec_hdr *)blockPtr;
     LE_INFO("LEB %u, PEB %lu OFFSET %lx, EC %llx",
             blk, blkOff / descPtr->mtdInfo.eraseSize, blkOff, ecHdrPtr->ec);
-    UpdateEraseCounter( ecHdrPtr, NULL );
+    UpdateEraseCounter( descPtr, ecHdrPtr, NULL );
     vidHdrPtr = (struct ubi_vid_hdr *)(blockPtr + be32toh(ecHdrPtr->vid_hdr_offset));
     if( descPtr->vtblPtr->vol_type == UBI_VID_STATIC )
     {
@@ -1232,7 +1399,7 @@ le_result_t pa_flash_WriteUbiAtBlock
             LE_CRIT("Failed to erase old PEB %u", pebErase);
         }
         ecHdrPtr = (struct ubi_ec_hdr *)blockPtr;
-        UpdateEraseCounter( ecHdrPtr, NULL );
+        UpdateEraseCounter( descPtr, ecHdrPtr, NULL );
         res = pa_flash_WriteAtBlock( desc,
                                      blkOff / descPtr->mtdInfo.eraseSize,
                                      blockPtr,
