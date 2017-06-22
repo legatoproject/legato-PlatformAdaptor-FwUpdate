@@ -78,6 +78,8 @@ typedef struct
     uint32_t imageSize;             ///< Image size
     uint32_t imageCrc;              ///< Image CRC
     uint32_t currentImageCrc;       ///< current image CRC
+    uint32_t globalCrc;             ///< CRC of all the package (crc in first cwe header)
+    uint32_t currentGlobalCrc;      ///< current global CRC
     size_t   totalRead;             ///< total read from the beginning to the end of the latest cwe
                                     ///< header read
     uint32_t currentOffset;         ///< offset in the current partition (must be a block erase
@@ -132,10 +134,11 @@ static size_t CurrentImageOffset = 0;
 
 //--------------------------------------------------------------------------------------------------
 /**
- * CRC32 variable
+ * CRC32 variables
  */
 //--------------------------------------------------------------------------------------------------
 static uint32_t CurrentImageCrc32 = LE_CRC_START_CRC32;
+static uint32_t CurrentGlobalCrc32 = LE_CRC_START_CRC32;
 
 //--------------------------------------------------------------------------------------------------
 /**
@@ -705,6 +708,7 @@ static void InitParameters
         DeltaUpdateCtx.patchRemLen = saveCtxPtr->patchHdr.size;
         CurrentImageOffset = saveCtxPtr->currentOffset;
         CurrentImageCrc32 = saveCtxPtr->currentImageCrc;
+        CurrentGlobalCrc32 = saveCtxPtr->currentGlobalCrc;
         CurrentCweHeader.imageType = saveCtxPtr->imageType;
         CurrentCweHeader.imageSize = saveCtxPtr->imageSize;
         CurrentCweHeader.crc32 = saveCtxPtr->imageCrc;
@@ -715,6 +719,7 @@ static void InitParameters
     {
         CurrentImageOffset = 0;
         CurrentImageCrc32 = LE_CRC_START_CRC32;
+        CurrentGlobalCrc32 = LE_CRC_START_CRC32;
         memset(&CurrentCweHeader, 0, sizeof(CurrentCweHeader));
         saveCtxPtr->isImageToBeRead = false;
         IsFirstDataWritten = false;
@@ -820,6 +825,7 @@ static size_t WriteImageData
                                 false,
                                 &isFlashed))
         {
+            CurrentGlobalCrc32 = le_crc_Crc32((uint8_t*)chunkPtr, length, CurrentGlobalCrc32);
             CurrentImageCrc32 = le_crc_Crc32((uint8_t*)chunkPtr, length, CurrentImageCrc32);
             LE_DEBUG ( "image data write: CRC in header: 0x%x, calculated CRC 0x%x",
                        cweHeaderPtr->crc32, CurrentImageCrc32 );
@@ -840,6 +846,7 @@ static size_t WriteImageData
                     saveCtxPtr->isImageToBeRead = false;
                 }
                 saveCtxPtr->currentImageCrc = CurrentImageCrc32;
+                saveCtxPtr->currentGlobalCrc = CurrentGlobalCrc32;
                 saveCtxPtr->totalRead += LenToFlash;
                 LenToFlash = 0;
                 saveCtxPtr->currentOffset = CurrentImageOffset;
@@ -889,8 +896,6 @@ static size_t WriteImageData
                     result = 0;
                 }
 
-                CurrentImageOffset = 0;
-                CurrentImageCrc32 = LE_CRC_START_CRC32;
                 // erase the path flag in options to allow new cwe header to be read
                 cweHeaderPtr->miscOpts &= (uint8_t)~((uint8_t)CWE_MISC_OPTS_DELTAPATCH);
                 LE_DEBUG ("CurrentImageOffset %d, CurrentImage %d",
@@ -941,12 +946,22 @@ static le_result_t ParseCweHeader
     if (-1 == saveCtxPtr->fullImageLength)
     {
         /*
-         * Full length of the CWE image is provided inside the
+         * Full length and global CRC of the CWE image is provided inside the
          * first CWE header
          */
         saveCtxPtr->fullImageLength = CurrentCweHeader.imageSize + CWE_HEADER_SIZE;
-        LE_DEBUG("New CWE: fullImageLength = %u", saveCtxPtr->fullImageLength);
+        saveCtxPtr->globalCrc = CurrentCweHeader.crc32;
+        saveCtxPtr->currentGlobalCrc = LE_CRC_START_CRC32;
+        LE_DEBUG("New CWE: fullImageLength = %u, CRC=0x%x", saveCtxPtr->fullImageLength,
+                 saveCtxPtr->globalCrc);
     }
+    else
+    {
+        // update the current global CRC with the current header
+        CurrentGlobalCrc32 = le_crc_Crc32((uint8_t*)chunkPtr, CWE_HEADER_SIZE, CurrentGlobalCrc32);
+        saveCtxPtr->currentGlobalCrc = CurrentGlobalCrc32;
+    }
+
     /* Check the value of the CurrentCweHeader.imageType which is proceed
      * If the image type is a composite one, the next data is a CWE header
      */
@@ -960,6 +975,8 @@ static le_result_t ParseCweHeader
             /* Next data will concern a component image */
             saveCtxPtr->isImageToBeRead = true;
         }
+        CurrentImageOffset = 0;
+        CurrentImageCrc32 = LE_CRC_START_CRC32;
         /* save the resume context */
         saveCtxPtr->imageType = CurrentCweHeader.imageType;
         saveCtxPtr->imageSize = CurrentCweHeader.imageSize;
@@ -1021,6 +1038,8 @@ static le_result_t ParsePatchHeaders
     saveCtxPtr->currentOffset = CurrentImageOffset;
     CurrentImageCrc32 = le_crc_Crc32((uint8_t*)chunkPtr, length, CurrentImageCrc32);
     saveCtxPtr->currentImageCrc = CurrentImageCrc32;
+    CurrentGlobalCrc32 = le_crc_Crc32((uint8_t*)chunkPtr, length, CurrentGlobalCrc32);
+    saveCtxPtr->currentGlobalCrc = CurrentGlobalCrc32;
     LE_DEBUG ( "patch header: CRC in header: 0x%x, calculated CRC 0x%x",
                CurrentCweHeader.crc32, CurrentImageCrc32 );
 
@@ -2047,6 +2066,11 @@ le_result_t pa_fwupdate_Download
             else
             {
                 LE_INFO("End of download");
+                if (saveCtxPtr->globalCrc != saveCtxPtr->currentGlobalCrc)
+                {
+                    LE_ERROR("Bad global CRC check");
+                    goto error;
+                }
             }
 
             if (saveCtxPtr->isModemDownloaded && (!saveCtxPtr->isFirstNvupDownloaded))
