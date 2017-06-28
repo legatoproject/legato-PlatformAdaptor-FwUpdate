@@ -1332,12 +1332,6 @@ static le_result_t EpollinRead
                         {
                             return LE_FAULT;
                         }
-                        else if ((evts & EPOLLRDHUP ) || (evts & EPOLLHUP))
-                        {
-                            // file descriptor has been closed
-                            LE_INFO("file descriptor %d has been closed", fd);
-                            return LE_CLOSED;
-                        }
                         else if (evts & EPOLLIN)
                         {
                             *lengthPtr = read (fd, bufferPtr, *lengthPtr);
@@ -1347,6 +1341,12 @@ static le_result_t EpollinRead
                                 return LE_CLOSED;
                             }
                             return LE_OK;
+                        }
+                        else if ((evts & EPOLLRDHUP ) || (evts & EPOLLHUP))
+                        {
+                            // file descriptor has been closed
+                            LE_INFO("file descriptor %d has been closed", fd);
+                            return LE_CLOSED;
                         }
                         else
                         {
