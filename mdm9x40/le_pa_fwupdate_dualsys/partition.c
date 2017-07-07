@@ -510,7 +510,7 @@ le_result_t partition_CheckIfMounted
 )
 {
     DIR *dirPtr;
-    struct dirent *direntPtr, *direntResPtr;
+    struct dirent *direntPtr;
     uint8_t direntTab[offsetof(struct dirent, d_name) + PATH_MAX + 1];
     FILE *fd;
     int  ubiMtdNum = - 1;
@@ -529,7 +529,7 @@ le_result_t partition_CheckIfMounted
     {
         direntPtr = (struct dirent *)&direntTab;
         // Read all entries in the directory
-        while ((0 == readdir_r( dirPtr, direntPtr, &direntResPtr )) && (direntResPtr))
+        while ((NULL != (direntPtr = readdir( dirPtr ))))
         {
            if ((0 == strncmp( "ubi", direntPtr->d_name, UBI_STRING_LENGTH )) &&
                (isdigit( direntPtr->d_name[UBI_STRING_LENGTH] )) &&
