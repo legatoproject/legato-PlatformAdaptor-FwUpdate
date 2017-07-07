@@ -1274,11 +1274,10 @@ static le_result_t partition_GetBadImageMask
     }
 
     subSysId = Partition_Identifier[imageType].subSysId;
-    if ((PA_FWUPDATE_SUBSYSID_NONE >= subSysId) ||
-        (PA_FWUPDATE_SUBSYSID_MAX <= subSysId))
+    if (PA_FWUPDATE_SUBSYSID_NONE == subSysId)
     {
-        LE_ERROR("Undefined partition for subSysId %d", subSysId);
-        return LE_BAD_PARAMETER;
+        LE_WARN("Undefined badImageMask for CWE imageType %d", imageType);
+        return LE_OK;
     }
 
     if (LE_OK != partition_GetInitialBootSystem(systemArray))
