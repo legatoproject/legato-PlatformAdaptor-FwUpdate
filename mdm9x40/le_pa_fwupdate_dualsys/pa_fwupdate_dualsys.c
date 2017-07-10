@@ -1822,6 +1822,10 @@ le_result_t pa_fwupdate_MarkGood
         {
             goto error;
         }
+        if (LE_OK != partition_SetBadImage(syncPartition[idx], false))
+        {
+            goto error;
+        }
     }
 
     ReleaseSwUpdate();
