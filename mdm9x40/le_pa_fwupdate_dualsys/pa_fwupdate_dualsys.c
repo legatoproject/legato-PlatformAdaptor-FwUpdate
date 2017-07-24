@@ -18,8 +18,6 @@
 #include "deltaUpdate_local.h"
 #include "partition_local.h"
 #include "interfaces.h"
-#include <sys/reboot.h>
-#include <linux/reboot.h>
 #include <sys/select.h>
 #include <sys/stat.h>
 #include <netinet/in.h>
@@ -1874,8 +1872,15 @@ void pa_fwupdate_Reset
     sync();
     sync();
     sleep(1);
-    reboot(LINUX_REBOOT_CMD_RESTART);
-    /* at this point the system is reseting */
+    if (-1 != system("/sbin/reboot"))
+    {
+        // the system reset is not done immediately so we need to keep here
+        while(1)
+        {
+            sleep(2);
+            LE_DEBUG("Waiting for reboot");
+        }
+    }
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -2261,7 +2266,7 @@ le_result_t pa_fwupdate_SetSystem
         pa_fwupdate_NvupApply();
         /* make a system reset */
         pa_fwupdate_Reset();
-        /* at this point the system is reseting */
+        /* at this point the system is resetting */
     }
 
     LE_DEBUG ("Set result %d", result);
@@ -2314,7 +2319,7 @@ le_result_t pa_fwupdate_Install
         pa_fwupdate_NvupApply();
         /* make a system reset */
         pa_fwupdate_Reset();
-        /* at this point the system is reseting */
+        /* at this point the system is resetting */
     }
 
     LE_DEBUG ("Swap result %d", result);
