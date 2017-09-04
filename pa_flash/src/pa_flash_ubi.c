@@ -696,54 +696,39 @@ static le_result_t ReadVtbl
 
 //--------------------------------------------------------------------------------------------------
 /**
- * Check if the UBI partition was externally modified since it was opened. At the first call, update
- * the Erase Counter (EC) min and max values. This may be also done by calling pa_flash_ScanUbi().
- * At the next calls, verify that the EC values are these expected: return true into the isGoodPtr
- * if the integrity of the UBI partition is good. Else, this parameter is returned to false.
- *
- * The integrity is controlled by comparing the previous and current max and min EC values. If they
- * differ, it is that an external update of EC was done outside the PA, because the PA will update
- * these values.
- * In a same way, if the wear-leveling threshold is greater than max EC - min EC, we considere that
- * potentially the wear-leveling will be triggered by UBI layers.
+ * Check if the partition is an UBI container and all blocks belonging to this partition are valid.
  *
  * @return
  *      - LE_OK            On success
  *      - LE_BAD_PARAMETER If desc is NULL or is not a valid descriptor
  *      - LE_FAULT         On failure
  *      - LE_IO_ERROR      If a flash IO error occurs
- *      - LE_FORMAT_ERROR  If the flash is not in UBI format
  */
 //--------------------------------------------------------------------------------------------------
-le_result_t pa_flash_CheckUbiIntegrity
+le_result_t pa_flash_CheckUbi
 (
-    pa_flash_Desc_t desc,        ///< [IN]  Private flash descriptor
-    bool *isGoodPtr              ///< [OUT] true if integrity is good, false otherwise
+    pa_flash_Desc_t desc,    ///< [IN]  Private flash descriptor
+    bool *isUbiPtr           ///< [OUT] true if the partition is an UBI container, false otherwise
 )
 {
     pa_flash_MtdDesc_t *descPtr = (pa_flash_MtdDesc_t *)desc;
-    pa_flash_MtdDesc_t descTemp;
-    pa_flash_Desc_t descTempPtr = (pa_flash_Desc_t)&descTemp;
     uint32_t peb;
     struct ubi_ec_hdr ecHeader;
     off_t pebOffset;
     bool isBad;
-    le_result_t res;
     pa_flash_Info_t *infoPtr = &(descPtr->mtdInfo);
-    pa_flash_Info_t *infoTempPtr = &(descTemp.mtdInfo);
+    le_result_t res;
 
-    if( (!descPtr) || (descPtr->magic != desc) || (!isGoodPtr) )
+    if( (!descPtr) || (descPtr->magic != desc) || (!isUbiPtr) )
     {
         return LE_BAD_PARAMETER;
     }
 
-    *isGoodPtr = false;
-    memcpy(&descTemp, descPtr, sizeof(descTemp));
-    descTemp.magic = &descTemp;
+    *isUbiPtr = false;
     for( peb = 0; peb < infoPtr->nbBlk; peb++ )
     {
         LE_DEBUG("Check if bad block at peb %u", peb);
-        res = pa_flash_CheckBadBlock( descTempPtr, peb, &isBad );
+        res = pa_flash_CheckBadBlock( descPtr, peb, &isBad );
         if( LE_OK != res )
         {
             goto error;
@@ -755,7 +740,7 @@ le_result_t pa_flash_CheckUbiIntegrity
         }
 
         pebOffset = peb * infoPtr->eraseSize;
-        res = ReadEcHeader( descTempPtr, pebOffset, &ecHeader, true );
+        res = ReadEcHeader( descPtr, pebOffset, &ecHeader, true );
         if (LE_FORMAT_ERROR == res)
         {
             // If the block is erased, continue the scan
@@ -766,7 +751,7 @@ le_result_t pa_flash_CheckUbiIntegrity
             // If the block has a bad magic, it does not belong to an UBI
             LE_DEBUG("MTD %d is NOT an UBI container", descPtr->mtdNum);
             // Not an UBI container.
-            return LE_FORMAT_ERROR;
+            return LE_OK;
         }
         else if (LE_OK != res )
         {
@@ -774,40 +759,11 @@ le_result_t pa_flash_CheckUbiIntegrity
         }
     }
 
-    *isGoodPtr = true;
-    if( !infoPtr->ubi )
-    {
-        // First call of this service for a partition. Just update the min and max EC
-        // This is also filled when pa_flash_ScanUbi() is called.
-        infoPtr->ubiMinEraseCount = infoTempPtr->ubiMinEraseCount;
-        infoPtr->ubiMaxEraseCount = infoTempPtr->ubiMaxEraseCount;
-        infoPtr->ubiWlThreshold = WL_THRESHOLD;
-        infoPtr->ubi = true;
-        // No check to do for the first call.
-        return LE_OK;
-    }
-
-    // If wear-leveling threshold is over EC (max - min), the UBI layer may have start
-    // the wear-leveling mechanism on this partition.
-    // If the EC max or EC min have changed during the copy, the UBI layer may have
-    // performed a scrubbing on this partition.
-    // If a case above is true, we recompute the checksum to ensure that the source
-    // was not modified by the UBI layer during the copy.
-    if( ((infoTempPtr->ubiMaxEraseCount - infoTempPtr->ubiMinEraseCount) >= WL_THRESHOLD) ||
-        ((infoTempPtr->ubiMaxEraseCount != infoPtr->ubiMaxEraseCount) ||
-         (infoTempPtr->ubiMinEraseCount != infoPtr->ubiMinEraseCount)) )
-    {
-        LE_ERROR("MTD %d was modified outside PA UBI", descPtr->mtdNum);
-        LE_ERROR("Open   : Min EC %lld Max EC %lld WL threshold %u",
-                 infoPtr->ubiMinEraseCount, infoPtr->ubiMaxEraseCount, WL_THRESHOLD);
-        LE_ERROR("Checked: Min EC %lld Max EC %lld WL threshold %u",
-                 infoTempPtr->ubiMinEraseCount, infoTempPtr->ubiMaxEraseCount, WL_THRESHOLD);
-        *isGoodPtr = false;
-    }
+    *isUbiPtr = true;
     return LE_OK;
 
 error:
-    return LE_FAULT;
+    return (LE_IO_ERROR == res ? LE_IO_ERROR : LE_FAULT);
 }
 
 //--------------------------------------------------------------------------------------------------

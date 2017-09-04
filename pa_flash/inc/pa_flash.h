@@ -133,6 +133,19 @@ pa_flash_Info_t;
 
 //--------------------------------------------------------------------------------------------------
 /**
+ * ECC and bad blocks statistics
+ */
+//--------------------------------------------------------------------------------------------------
+typedef struct
+{
+    uint32_t corrected;    ///< Number of bits corrected for ECC
+    uint32_t failed;       ///< Number of unrecoverable error for ECC
+    uint32_t badBlocks;    ///< Number of bad blocks currently marked
+}
+pa_flash_EccStats_t;
+
+//--------------------------------------------------------------------------------------------------
+/**
  * flash descriptor for flash operation access
  */
 //--------------------------------------------------------------------------------------------------
@@ -177,6 +190,22 @@ le_result_t pa_flash_RetrieveInfo
 (
     pa_flash_Desc_t desc,     ///< [IN] Private flash descriptor
     pa_flash_Info_t **infoPtr ///< [IN] Pointer to copy the flash information
+);
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Get the ECC and bad blocks statistics
+ *
+ * @return
+ *      - LE_OK            On success
+ *      - LE_BAD_PARAMETER If desc is NULL or isBadBlockPtr is NULL
+ *      - LE_FAULT         On failure
+ */
+//--------------------------------------------------------------------------------------------------
+le_result_t pa_flash_GetEccStats
+(
+    pa_flash_Desc_t      desc,       ///< [IN] Private flash descriptor
+    pa_flash_EccStats_t *eccStatsPtr ///< [IN] Pointer to copy the ECC and bad blocks statistics
 );
 
 //--------------------------------------------------------------------------------------------------
@@ -438,29 +467,19 @@ le_result_t pa_flash_WriteAtBlock
 
 //--------------------------------------------------------------------------------------------------
 /**
- * Check if the UBI partition was externally modified since it was opened. At the first call, update
- * the Erase Counter (EC) min and max values. This may be also done by calling pa_flash_ScanUbi().
- * At the next calls, verify that the EC values are these expected: return true into the isGoodPtr
- * if the integrity of the UBI partition is good. Else, this parameter is returned to false.
- *
- * The integrity is controlled by comparing the previous and current max and min EC values. If they
- * differ, it is that an external update of EC was done outside the PA, because the PA will update
- * these values.
- * In a same way, if the wear-leveling threshold is greater than max EC - min EC, we considere that
- * potentially the wear-leveling will be triggered by UBI layers.
+ * Check if the partition is an UBI container and all blocks belonging to this partition are valid.
  *
  * @return
  *      - LE_OK            On success
  *      - LE_BAD_PARAMETER If desc is NULL or is not a valid descriptor
  *      - LE_FAULT         On failure
  *      - LE_IO_ERROR      If a flash IO error occurs
- *      - LE_FORMAT_ERROR  If the flash is not in UBI format
  */
 //--------------------------------------------------------------------------------------------------
-le_result_t pa_flash_CheckUbiIntegrity
+le_result_t pa_flash_CheckUbi
 (
-    pa_flash_Desc_t desc,        ///< [IN]  Private flash descriptor
-    bool *isGoodPtr              ///< [OUT] true if integrity is good, false otherwise
+    pa_flash_Desc_t desc,    ///< [IN]  Private flash descriptor
+    bool *isUbiPtr           ///< [OUT] true if the partition is an UBI container, false otherwise
 );
 
 //--------------------------------------------------------------------------------------------------

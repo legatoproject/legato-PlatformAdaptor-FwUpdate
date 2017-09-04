@@ -266,6 +266,44 @@ le_result_t pa_flash_RetrieveInfo
 
 //--------------------------------------------------------------------------------------------------
 /**
+ * Get the ECC and bad blocks statistics
+ *
+ * @return
+ *      - LE_OK            On success
+ *      - LE_BAD_PARAMETER If desc is NULL or isBadBlockPtr is NULL
+ *      - LE_FAULT         On failure
+ */
+//--------------------------------------------------------------------------------------------------
+le_result_t pa_flash_GetEccStats
+(
+    pa_flash_Desc_t      desc,       ///< [IN] Private flash descriptor
+    pa_flash_EccStats_t *eccStatsPtr ///< [IN] Pointer to copy the ECC and bad blocks statistics
+)
+{
+    pa_flash_MtdDesc_t *descPtr = (pa_flash_MtdDesc_t *)desc;
+    struct mtd_ecc_stats eccStats;
+    int ret;
+
+    if( (!descPtr) || (descPtr->magic != desc) || (!eccStatsPtr) )
+    {
+        return LE_BAD_PARAMETER;
+    }
+
+    ret = ioctl(descPtr->fd, ECCGETSTATS, &eccStats);
+    if( -1 == ret )
+    {
+        LE_ERROR("MTD %d: ECCGETSTATS fails: %m", descPtr->mtdNum);
+        return LE_FAULT;
+    }
+    eccStatsPtr->corrected = eccStats.corrected;
+    eccStatsPtr->failed = eccStats.failed;
+    eccStatsPtr->badBlocks = eccStats.badblocks;
+
+    return LE_OK;
+}
+
+//--------------------------------------------------------------------------------------------------
+/**
  * Open a flash for the given operation and return a descriptor
  *
  * @return

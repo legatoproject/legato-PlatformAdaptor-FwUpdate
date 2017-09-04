@@ -594,8 +594,8 @@ le_result_t partition_CheckIfMounted
  * Check if data flashed into a partition are correctly written
  *
  * @return
- *      - LE_OK on success
- *      - LE_FAULT on failure
+ *      - LE_OK       on success
+ *      - LE_FAULT    on failure
  */
 //--------------------------------------------------------------------------------------------------
 le_result_t partition_CheckData
@@ -617,7 +617,9 @@ le_result_t partition_CheckData
     off_t offset = atOffset;
     uint32_t crc32 = LE_CRC_START_CRC32;
     pa_flash_Info_t* flashInfoPtr;
+    pa_flash_EccStats_t flashEccStats;
     pa_flash_OpenMode_t mode = PA_FLASH_OPENMODE_READONLY;
+    le_result_t res;
 
     if (isLogical)
     {
@@ -642,24 +644,51 @@ le_result_t partition_CheckData
     while ((imageSize < sizeToCheck) && (offset < (flashInfoPtr->nbLeb * flashInfoPtr->eraseSize)))
     {
         loff_t blkOff = (loff_t)offset;
+        uint32_t iBlk, nBlk;
 
         size = (((imageSize + flashInfoPtr->eraseSize) < sizeToCheck)
                    ? flashInfoPtr->eraseSize
                    : (sizeToCheck - imageSize));
         LE_DEBUG("Read %d at offset 0x%lx, block offset 0x%llx", size, offset, blkOff);
-        if (LE_OK != pa_flash_ReadAtBlock( flashFd,
-                                           ((off_t)blkOff / flashInfoPtr->eraseSize),
-                                           checkBlockPtr,
-                                           size))
+        if (LE_OK != pa_flash_SeekAtBlock( flashFd,
+                                           ((off_t)blkOff / flashInfoPtr->eraseSize) ))
         {
-            LE_ERROR("read fails for offset 0x%llx: %m", blkOff);
+            LE_ERROR("seek fails for offset 0x%llx: %m", blkOff);
             goto error;
+        }
+        nBlk = (size + (flashInfoPtr->writeSize - 1)) / flashInfoPtr->writeSize;
+        for (iBlk = 0; iBlk < nBlk; iBlk++)
+        {
+            if (LE_OK != pa_flash_Read( flashFd,
+                                        (checkBlockPtr + (iBlk * flashInfoPtr->writeSize)),
+                                        flashInfoPtr->writeSize ))
+            {
+                LE_ERROR("read fails for offset 0x%llx: %m", blkOff);
+                goto error;
+            }
         }
 
         crc32 = le_crc_Crc32( checkBlockPtr, size, crc32);
         offset += size;
         imageSize += size;
     }
+
+    // Check for unrecoverable ECC errors on active partition and abort if some.
+    res = pa_flash_GetEccStats( flashFd, &flashEccStats );
+    if (LE_OK != res)
+    {
+        LE_ERROR("Getting ECC statistics fails on mtd%d: %d", mtdNum, res);
+        goto error;
+    }
+    // Corrected ECC errors are ignored, because normally the data are valid.
+    // Abort in case of unrecoverable ECC errors.
+    if (flashEccStats.failed)
+    {
+        LE_CRIT("Unrecoverable ECC errors detected on mtd%d: %u %u %u",
+                 mtdNum, flashEccStats.corrected, flashEccStats.failed, flashEccStats.badBlocks);
+        goto error;
+    }
+
     if (crc32 != crc32ToCheck)
     {
         LE_CRIT( "Bad CRC32 calculated on mtd%d: read 0x%08x != expected 0x%08x",

@@ -1549,6 +1549,7 @@ static le_result_t CheckFdType
  *      - LE_UNSUPPORTED    the feature is not supported
  *      - LE_UNAVAILABLE    the flash access is not granted for SW update
  *      - LE_FAULT          on failure
+ *      - LE_IO_ERROR       on unrecoverable ECC errors detected on active partition
  */
 //--------------------------------------------------------------------------------------------------
 le_result_t pa_fwupdate_MarkGood
@@ -1577,13 +1578,14 @@ le_result_t pa_fwupdate_MarkGood
     int idx;
     pa_flash_Desc_t flashFdSrc = NULL, flashFdDst = NULL;
     pa_flash_Info_t *flashInfoSrcPtr, *flashInfoDstPtr;
+    pa_flash_EccStats_t flashEccStats;
     char* mtdSrcNamePtr;
     char* mtdDstNamePtr;
     uint8_t* flashBlockPtr = NULL;
     uint32_t crc32Src;
-    bool isLogicalSrc, isLogicalDst, isDualSrc, isDualDst, isGood;
+    bool isLogicalSrc, isLogicalDst, isDualSrc, isDualDst, isUbiPartition, isRetryNeeded;
     pa_fwupdate_InternalStatus_t internalUpdateStatus;
-    le_result_t res;
+    le_result_t res, returnedRes = LE_FAULT;
 
     if (LE_OK != partition_GetInitialBootSystem(iniBootSystem))
     {
@@ -1616,10 +1618,18 @@ le_result_t pa_fwupdate_MarkGood
         RECORD_DWL_STATUS(PA_FWUPDATE_INTERNAL_STATUS_UNKNOWN);
     }
 
-    /* Set the Sw update state in SSDATA to SYNC */
-    if (pa_fwupdate_SetState(PA_FWUPDATE_STATE_SYNC) != LE_OK)
+    // Set the system as Out-Of-Sync. If the synchronization fails, the system MUST be
+    // seen as Out-Of-Sync.
+    if (LE_OK != pa_fwupdate_SetUnsyncState() )
     {
-        LE_ERROR ("not possible to update the SW update state to SYNC");
+        LE_CRIT ("Failed to mark system as Out-Of-Sync");
+        goto error;
+    }
+
+    // Set the Sw update state in SSDATA to SYNC
+    if (LE_OK != pa_fwupdate_SetState(PA_FWUPDATE_STATE_SYNC))
+    {
+        LE_ERROR ("Not possible to update the SW update state to SYNC");
         goto error;
     }
 
@@ -1689,12 +1699,29 @@ le_result_t pa_fwupdate_MarkGood
             goto error;
         }
 
-        // Try to check the integrity of UBI. At the first call, just register the EC values
-        // If the MTD does not refer to an UBI, LE_FORMAT_ERROR is reported.
-        res = pa_flash_CheckUbiIntegrity( flashFdSrc, &isGood );
-        if( (!((LE_OK == res) && (isGood))) && (LE_FORMAT_ERROR != res) )
+        // Try to check the integrity of UBI. If the isUbiPartition is false, the partition is
+        // not an UBI container
+        res = pa_flash_CheckUbi( flashFdSrc, &isUbiPartition );
+        if (LE_OK != res)
         {
-            LE_ERROR("IsUbi of SRC MTD %d fails: res=%d", mtdSrc, res);
+            LE_ERROR("CheckUbi of SRC MTD %d fails: res=%d", mtdSrc, res);
+            goto error;
+        }
+
+        // Check for unrecoverable ECC errors on active partition and abort if some.
+        res = pa_flash_GetEccStats( flashFdSrc, &flashEccStats );
+        if( LE_OK != res )
+        {
+            LE_ERROR("Getting ECC stats on SRC MTD %d fails: res=%d", mtdSrc, res);
+            goto error;
+        }
+        // Corrected ECC errors are ignored, because normally the data are valid.
+        // Abort in case of unrecoverable ECC errors.
+        if( flashEccStats.failed )
+        {
+            LE_ERROR("Unrecoverable ECC errors on SRC MTD %d: Corrected %u Unrecoverable %u ",
+                     mtdSrc, flashEccStats.corrected, flashEccStats.failed);
+            returnedRes = LE_IO_ERROR;
             goto error;
         }
 
@@ -1720,101 +1747,137 @@ le_result_t pa_fwupdate_MarkGood
         int nbBlk, nbSrcBlkCnt; // Counter to maximum block to be checked
         size_t srcSize;
 
-        crc32Src = LE_CRC_START_CRC32;
+        // In case of UBI partition, a second try will be performed if the checksum of active
+        // changed during the copy.
+        isRetryNeeded = false;
 
-        if (LE_OK != pa_flash_Scan( flashFdSrc, NULL ))
+        do
         {
-            LE_ERROR("Scan of SRC MTD %d fails", mtdSrc);
-            goto error;
-        }
-        if (LE_OK != pa_flash_Scan( flashFdDst, NULL ))
-        {
-            LE_ERROR("Scan of DST MTD %d fails", mtdDst);
-            goto error;
-        }
+            crc32Src = LE_CRC_START_CRC32;
 
-        if (LE_OK != pa_flash_SeekAtBlock( flashFdSrc, 0 ))
-        {
-            LE_ERROR("Scan of SRC MTD %d fails", mtdSrc);
-            goto error;
-        }
-        if (LE_OK != pa_flash_SeekAtBlock( flashFdDst, 0 ))
-        {
-            LE_ERROR("Scan of DST MTD %d fails", mtdDst);
-            goto error;
-        }
-        for (nbSrcBlkCnt = nbBlk = 0;
-             (nbBlk < flashInfoSrcPtr->nbLeb) && (nbBlk < flashInfoDstPtr->nbLeb);
-             nbBlk++)
-        {
-            if (LE_OK != pa_flash_ReadAtBlock( flashFdSrc,
-                                               nbBlk,
-                                               flashBlockPtr,
-                                               flashInfoSrcPtr->eraseSize ))
+            if (LE_OK != pa_flash_Scan( flashFdSrc, NULL ))
             {
-                LE_ERROR("pa_flash_Read fails for block %d: %m", nbBlk);
+                LE_ERROR("Scan of SRC MTD %d fails", mtdSrc);
+                goto error;
+            }
+            if (LE_OK != pa_flash_Scan( flashFdDst, NULL ))
+            {
+                LE_ERROR("Scan of DST MTD %d fails", mtdDst);
                 goto error;
             }
 
-            if (LE_OK != pa_flash_EraseBlock( flashFdDst, nbBlk ))
+            if (LE_OK != pa_flash_SeekAtBlock( flashFdSrc, 0 ))
             {
-                LE_ERROR("EraseMtd fails for block %d: %m", nbBlk);
+                LE_ERROR("Scan of SRC MTD %d fails", mtdSrc);
                 goto error;
             }
-            if (LE_OK != pa_flash_WriteAtBlock( flashFdDst,
-                                                nbBlk,
-                                                flashBlockPtr,
-                                                flashInfoDstPtr->eraseSize ))
+            if (LE_OK != pa_flash_SeekAtBlock( flashFdDst, 0 ))
             {
-                LE_ERROR("pa_flash_Write fails for block %d: %m", nbBlk);
+                LE_ERROR("Scan of DST MTD %d fails", mtdDst);
                 goto error;
             }
-            else
+            for (nbSrcBlkCnt = nbBlk = 0;
+                 (nbBlk < flashInfoSrcPtr->nbLeb) && (nbBlk < flashInfoDstPtr->nbLeb);
+                 nbBlk++)
             {
-                crc32Src = le_crc_Crc32(flashBlockPtr, flashInfoSrcPtr->eraseSize, crc32Src);
-                nbSrcBlkCnt ++;
-            }
-        }
-        if (nbBlk < flashInfoSrcPtr->nbLeb)
-        {
-            LE_WARN("Bad block on destination MTD ? Missing %d blocks",
-                    flashInfoSrcPtr->nbLeb - nbBlk);
-        }
-        for (; nbBlk < flashInfoDstPtr->nbLeb; nbBlk++)
-        {
-            // Erase remaing blocks of the destination
-            pa_flash_EraseBlock( flashFdDst, nbBlk );
-        }
+                if (LE_OK != pa_flash_ReadAtBlock( flashFdSrc,
+                                                   nbBlk,
+                                                   flashBlockPtr,
+                                                   flashInfoSrcPtr->eraseSize ))
+                {
+                    LE_ERROR("pa_flash_Read fails for block %d: %m", nbBlk);
+                    goto error;
+                }
 
-        srcSize = nbSrcBlkCnt * flashInfoSrcPtr->eraseSize;
-        // Try to check the integrity of UBI.
-        // If the MTD does not refer to an UBI, LE_FORMAT_ERROR is reported.
-        // If an external write access is detected on the UBI container, isGood is set to false.
-        res = pa_flash_CheckUbiIntegrity( flashFdSrc, &isGood );
-        if( (LE_OK == res) && (!isGood) )
-        {
-            // In this case, we need to recompute the checksum of the MTD to ensure that it is
-            // conform to what we read first.
-            LE_WARN("UBI uncontrolled write performed to MTD %d. Recompute the checksum", mtdSrc);
-            if (LE_OK != partition_CheckData(mtdSrc, isLogicalSrc, isDualSrc, srcSize, 0,
-                                             crc32Src, FlashImgPool))
+                if (LE_OK != pa_flash_EraseBlock( flashFdDst, nbBlk ))
+                {
+                    LE_ERROR("EraseMtd fails for block %d: %m", nbBlk);
+                    goto error;
+                }
+                if (LE_OK != pa_flash_WriteAtBlock( flashFdDst,
+                                                    nbBlk,
+                                                    flashBlockPtr,
+                                                    flashInfoDstPtr->eraseSize ))
+                {
+                    LE_ERROR("pa_flash_Write fails for block %d: %m", nbBlk);
+                    goto error;
+                }
+                else
+                {
+                    crc32Src = le_crc_Crc32(flashBlockPtr, flashInfoSrcPtr->eraseSize, crc32Src);
+                    nbSrcBlkCnt ++;
+                }
+            }
+            if (nbBlk < flashInfoSrcPtr->nbLeb)
             {
-                LE_ERROR("Checksum failed after rereading source MTD %d", mtdSrc);
+                LE_WARN("Bad block on destination MTD ? Missing %d blocks",
+                        flashInfoSrcPtr->nbLeb - nbBlk);
+            }
+            for (; nbBlk < flashInfoDstPtr->nbLeb; nbBlk++)
+            {
+                // Erase remaing blocks of the destination
+                pa_flash_EraseBlock( flashFdDst, nbBlk );
+            }
+
+            srcSize = nbSrcBlkCnt * flashInfoSrcPtr->eraseSize;
+            // Check the integrity if the partition is expected to be an UBI container
+            if (isUbiPartition)
+            {
+                // In this case, we need to recompute the checksum of the MTD to ensure that it is
+                // conform to what we read first.
+                res = partition_CheckData(mtdSrc, isLogicalSrc, isDualSrc, srcSize, 0,
+                                                 crc32Src, FlashImgPool);
+                if (LE_OK != res)
+                {
+                    // If first try fails, redo another attempt
+                    LE_ERROR("Checksum failed after rereading source MTD %d", mtdSrc);
+                    isRetryNeeded = !isRetryNeeded;
+                }
+                else
+                {
+                    // The copy is good, no do any retry
+                    isRetryNeeded = false;
+                }
+                if ((LE_OK != res) && (!isRetryNeeded))
+                {
+                    // The second try fails: Abort the sync
+                    goto error;
+                }
+                res = LE_OK;
+            }
+
+            if (LE_OK != res)
+            {
+                // The UBI integrity is corrupt.
+                LE_ERROR("IsUbi of SRC MTD %d fails: res=%d", mtdSrc, res);
                 goto error;
             }
-            res = LE_OK;
+
+            // Check for unrecoverable ECC errors on active partition and abort if some.
+            res = pa_flash_GetEccStats( flashFdSrc, &flashEccStats );
+            if( LE_OK != res )
+            {
+                LE_ERROR("Getting ECC stats on SRC MTD %d fails: res=%d", mtdSrc, res);
+                goto error;
+            }
+            // Corrected ECC errors are ignored, because normally the data are valid.
+            // Abort in case of unrecoverable ECC errors.
+            if( flashEccStats.failed )
+            {
+                LE_ERROR("Unrecoverable ECC errors on SRC MTD %d: Corrected %u Unrecoverable %u ",
+                         mtdSrc, flashEccStats.corrected, flashEccStats.failed);
+                returnedRes = LE_IO_ERROR;
+                goto error;
+            }
         }
-        if( (LE_OK != res) && (LE_FORMAT_ERROR != res) )
-        {
-            // The UBI integrity is corrupt.
-            LE_ERROR("IsUbi of SRC MTD %d fails: res=%d", mtdSrc, res);
-            goto error;
-        }
+        while (isRetryNeeded);
+
         pa_flash_Close(flashFdSrc);
         flashFdSrc = NULL;
         pa_flash_Close(flashFdDst);
         flashFdDst = NULL;
 
+        // Verify the checksum of the destination MTD to ensure it matches the source checksum
         if (LE_OK != partition_CheckData(mtdDst, isLogicalDst, isDualDst, srcSize, 0, crc32Src,
                                          FlashImgPool))
         {
@@ -1856,7 +1919,7 @@ error:
     LE_DEBUG ("sync failure --> pass SW update to NORMAL");
     pa_fwupdate_SetState (PA_FWUPDATE_STATE_NORMAL);
     /* do not get the result, we must return the previous error */
-    return LE_FAULT;
+    return returnedRes;
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -2334,6 +2397,9 @@ le_result_t pa_fwupdate_Install
  *      - LE_OK             on success
  *      - LE_UNSUPPORTED    the feature is not supported
  *      - LE_FAULT          on failure
+ *      - LE_IO_ERROR       if SYNC fails due to unrecoverable ECC errors. In this case, the update
+ *                          without sync is forced, but the whole system must be updated to ensure
+ *                          that the new update system will be workable
  */
 //--------------------------------------------------------------------------------------------------
 le_result_t pa_fwupdate_InitDownload
@@ -2358,7 +2424,12 @@ le_result_t pa_fwupdate_InitDownload
         if (result != LE_OK)
         {
             LE_ERROR("failed to SYNC (%s)", LE_RESULT_TXT(result));
-            result = LE_FAULT;
+            result = (LE_IO_ERROR == result ? LE_IO_ERROR : LE_FAULT);
+            if (LE_IO_ERROR == result)
+            {
+                LE_WARN("SYNC failed due to ECC errors. Forcing UPDATE without SYNC mode.");
+                pa_fwupdate_DisableSyncBeforeUpdate(true);
+            }
         }
     }
     else
@@ -2514,7 +2585,7 @@ le_result_t pa_fwupdate_DisableSyncBeforeUpdate
     if (true == IsSyncBeforeUpdateDisabled)
     {
         LE_WARN("Sync before update is now DISABLED. Updating without performing a sync before");
-        LE_WARN("let the system into a unworkable state !");
+        LE_WARN("may let the whole system into a unworkable state !");
 
     }
     return LE_OK;
