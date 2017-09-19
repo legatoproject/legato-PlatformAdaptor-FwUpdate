@@ -815,6 +815,21 @@ static size_t WriteImageData
     else
     {
         static size_t LenToFlash = 0;
+        ResumeCtxSave_t *saveCtxPtr = &resumeCtxPtr->saveCtx;
+
+        // There are 3 cases where (saveCtxPtr->currentOffset == CurrentImageOffset):
+        // 1. Data actually written to the flash and ResumeCtx updated (isFlashed == true)
+        // 2. New download case, set in InitParameters()
+        // 3. Download resume case, set in InitParameters()
+        // Case 1 is already handled in the following, and in this case LenToFlash == 0.
+        // For cases 2 and 3, there is a possibility that the download was previously suspended or
+        // stopped, leaving LenToFlash != 0. In these cases, LenToFlash should be cleared here to
+        // keep correct calculation of ResumeCtx (saveCtxPtr->totalRead).
+        if ((saveCtxPtr->currentOffset == CurrentImageOffset) && LenToFlash)
+        {
+            LE_DEBUG ("Clear LenToFlash %d in a new download cycle", LenToFlash);
+            LenToFlash = 0;
+        }
 
         if (LE_OK == WriteData (cweHeaderPtr,
                                 length,
@@ -837,7 +852,7 @@ static size_t WriteImageData
                 le_result_t ret;
 
                 LE_DEBUG("Store resume context ...");
-                ResumeCtxSave_t *saveCtxPtr = &resumeCtxPtr->saveCtx;
+
                 if (cweHeaderPtr->miscOpts & CWE_MISC_OPTS_DELTAPATCH)
                 {
                     // a patch has been completely received => wait a new header
