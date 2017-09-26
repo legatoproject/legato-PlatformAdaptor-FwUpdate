@@ -120,7 +120,18 @@ static le_result_t GetNewBlock
 
     for( ieb = 0; ieb < infoPtr->nbBlk; ieb++ )
     {
-        if( (INVALID_PEB != descPtr->lebToPeb[ieb]) ||
+        int lebIndex;
+
+        for( lebIndex = 0; (lebIndex < infoPtr->nbBlk); lebIndex++ )
+        {
+            if( descPtr->lebToPeb[lebIndex] == ieb )
+            {
+                lebIndex = INVALID_PEB;
+                break;
+            }
+        }
+
+        if( (INVALID_PEB == lebIndex) ||
             (ieb == descPtr->vtblPeb[0]) ||
             (ieb == descPtr->vtblPeb[1]) )
         {
