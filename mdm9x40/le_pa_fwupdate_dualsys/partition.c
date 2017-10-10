@@ -740,7 +740,8 @@ le_result_t partition_CheckData
     size_t sizeToCheck,                ///< [IN] Size to be used to compute the CRC
     off_t atOffset,                    ///< [IN] Force offset to start from
     uint32_t crc32ToCheck,             ///< [IN] Expected CRC 32
-    le_mem_PoolRef_t flashImgPool      ///< [IN] memory pool
+    le_mem_PoolRef_t flashImgPool,     ///< [IN] memory pool
+    bool isEccChecked                  ///< [IN] whether need to check ecc status in the partition
 )
 {
     pa_flash_Desc_t flashFd = NULL;
@@ -819,7 +820,14 @@ le_result_t partition_CheckData
     {
         LE_CRIT("Unrecoverable ECC errors detected on mtd%d: %u %u %u",
                  mtdNum, flashEccStats.corrected, flashEccStats.failed, flashEccStats.badBlocks);
-        goto error;
+        // ECCGETSTATS only record the number of ECC errors happened from power in this partition.
+        // In case the dest partition is erased after sync/update, there should be no more ECC errors.
+        // So remove the check for the dest partition. For the src partition, there is a bug in driver that ECC
+        // can't be detected, so keep the ecc check for src partition.
+        if (true == isEccChecked)
+        {
+          goto error;
+        }
     }
 
     if (crc32 != crc32ToCheck)
@@ -1128,7 +1136,7 @@ le_result_t partition_WriteDataSBL
                                                ? 0
                                                : (flashInfo.nbBlk / 2)) * flashInfo.eraseSize,
                                               hdrPtr->crc32,
-                                              *ctxPtr->flashPoolPtr))
+                                              *ctxPtr->flashPoolPtr, true))
             {
                 LE_CRIT("SBL flash failed at block %d. Erasing...", sblBaseBlk);
                 for (atBlk = 0; atBlk < (flashInfo.nbBlk / 2); atBlk++)
@@ -1382,9 +1390,8 @@ le_result_t partition_WriteUpdatePartition
             LE_ERROR( "Unable to find a valid mtd for image type %d", hdrPtr->imageType );
             return LE_FAULT;
         }
-
         ret = partition_CheckData( mtdNum, isLogical, isDual, hdrPtr->imageSize, 0, hdrPtr->crc32,
-                                   *ctxPtr->flashPoolPtr );
+                                   *ctxPtr->flashPoolPtr, false);
     }
     return ret;
 error:

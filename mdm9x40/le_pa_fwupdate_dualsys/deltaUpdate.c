@@ -417,7 +417,8 @@ le_result_t deltaUpdate_ApplyPatch
                                                patchMetaHdrPtr->origSize,
                                                0,
                                                patchMetaHdrPtr->origCrc32,
-                                               *ctxPtr->poolPtr ))
+                                               *ctxPtr->poolPtr,
+                                               true))
         {
             LE_CRIT("Cannot apply patch. Partition \"%s\" CRC32 does not match",
                     MtdNamePtr);
@@ -591,7 +592,8 @@ le_result_t deltaUpdate_ApplyPatch
                                               patchMetaHdrPtr->destSize,
                                               0,
                                               patchMetaHdrPtr->destCrc32,
-                                              *ctxPtr->poolPtr ))
+                                              *ctxPtr->poolPtr,
+                                              true))
             {
                 LE_CRIT("Patch failed Partition %d (\"%s\") CRC32 does not match",
                         MtdDestNum, MtdNamePtr);

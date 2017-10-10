@@ -145,7 +145,8 @@ le_result_t partition_CheckData
     size_t sizeToCheck,                ///< [IN] Size to be used to compute the CRC
     off_t atOffset,                    ///< [IN] Force offset to start from
     uint32_t crc32ToCheck,             ///< [IN] Expected CRC 32
-    le_mem_PoolRef_t flashImgPool      ///< [IN] memory pool
+    le_mem_PoolRef_t flashImgPool,     ///< [IN] memory pool
+    bool isEccChecked                  ///< [IN] whether need to check ecc status in the partition
 );
 
 //--------------------------------------------------------------------------------------------------

@@ -2112,7 +2112,7 @@ le_result_t pa_fwupdate_MarkGood
                 // In this case, we need to recompute the checksum of the MTD to ensure that it is
                 // conform to what we read first.
                 res = partition_CheckData(mtdSrc, isLogicalSrc, isDualSrc, srcSize, 0,
-                                                 crc32Src, FlashImgPool);
+                                                 crc32Src, FlashImgPool, true);
                 if (LE_OK != res)
                 {
                     // If first try fails, redo another attempt
@@ -2165,7 +2165,7 @@ le_result_t pa_fwupdate_MarkGood
 
         // Verify the checksum of the destination MTD to ensure it matches the source checksum
         if (LE_OK != partition_CheckData(mtdDst, isLogicalDst, isDualDst, srcSize, 0, crc32Src,
-                                         FlashImgPool))
+                                         FlashImgPool, false))
         {
             goto error;
         }
