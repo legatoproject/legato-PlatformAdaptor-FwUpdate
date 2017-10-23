@@ -509,10 +509,10 @@ le_result_t partition_CheckIfMounted
     int mtdNum
 )
 {
-    DIR *dirPtr;
+    DIR* dirPtr;
     struct dirent *direntPtr;
     uint8_t direntTab[offsetof(struct dirent, d_name) + PATH_MAX + 1];
-    FILE *fd;
+    FILE* fdPtr;
     int  ubiMtdNum = - 1;
     char ubiMtdNumStr[PATH_MAX];
     char mountStr[PATH_MAX];
@@ -539,11 +539,11 @@ le_result_t partition_CheckIfMounted
                          direntPtr->d_name );
                ubiMtdNum = - 1;
                // Try to read the MTD number attached to this UBI
-               fd = fopen( ubiMtdNumStr, "r" );
-               if (fd)
+               fdPtr = fopen( ubiMtdNumStr, "r" );
+               if (fdPtr)
                {
-                   fscanf( fd, "%d", &ubiMtdNum );
-                   fclose( fd );
+                   fscanf( fdPtr, "%d", &ubiMtdNum );
+                   fclose( fdPtr );
                }
                else
                {
@@ -566,10 +566,10 @@ le_result_t partition_CheckIfMounted
     if (ubiMtdNum != mtdNum)
     {
         snprintf( ubiMtdNumStr, sizeof(ubiMtdNumStr), "/dev/mtdblock%d ", mtdNum );
-        fd = fopen( "/proc/mounts", "r" );
-        if (fd)
+        fdPtr = fopen( "/proc/mounts", "r" );
+        if (fdPtr)
         {
-            while (fgets( mountStr, sizeof(mountStr), fd ))
+            while (fgets( mountStr, sizeof(mountStr), fdPtr ))
             {
                 if (0 == strncmp( mountStr, ubiMtdNumStr, strlen(ubiMtdNumStr) ) )
                 {
@@ -578,10 +578,124 @@ le_result_t partition_CheckIfMounted
                     break;
                 }
             }
-            fclose(fd);
+            fclose(fdPtr);
         }
         else
         {
+            res = LE_FAULT;
+        }
+    }
+
+    return res;
+}
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * This function checks if the partition related to the given MTD is currently an UBI container. If
+ * yes, returns the UBI Identifier and the number of volumes detected.
+ *
+ * @return
+ *      - LE_OK            The partition is an UBI container
+ *      - LE_BAD_PARAMETER The MTD number is negative, or the other parameters are NULL
+ *      - LE_FORMAT_ERROR  The partition is not an UBI container
+ *      - LE_FAULT         If an error occurs
+ */
+//--------------------------------------------------------------------------------------------------
+le_result_t partition_CheckIfUbiAndGetUbiVolumes
+(
+    int mtdNum,             ///< [IN]  MTD to check as UBI container
+    int* ubiIdPtr,          ///< [OUT] UBI identifier in case of UBI container
+    int* nbUbiVolumesPtr    ///< [OUT] Number of UBI volumes detected
+)
+{
+    DIR* dirPtr;
+    struct dirent *direntPtr;
+    uint8_t direntTab[offsetof(struct dirent, d_name) + PATH_MAX + 1];
+    FILE* fdPtr;
+    int  ubiMtdNum = - 1;
+    char ubiTmpStr[PATH_MAX];
+    le_result_t res = LE_FORMAT_ERROR;
+
+    if ((0 > mtdNum) || (!ubiIdPtr) || (!nbUbiVolumesPtr))
+    {
+        return LE_BAD_PARAMETER;
+    }
+
+    *ubiIdPtr = -1;        // Not a valid UBI identifier
+    *nbUbiVolumesPtr = -1; // Not a valid number of UBI volumes
+
+    // Check if the MTD is attached as UBI
+    dirPtr = opendir( SYS_CLASS_UBI_PATH );
+    if (dirPtr)
+    {
+        direntPtr = (struct dirent *)&direntTab;
+        // Read all entries in the directory
+        while ((NULL != (direntPtr = readdir( dirPtr ))))
+        {
+           if ((0 == strncmp( "ubi", direntPtr->d_name, UBI_STRING_LENGTH )) &&
+               (isdigit( direntPtr->d_name[UBI_STRING_LENGTH] )) &&
+               (!strchr( direntPtr->d_name, '_')) )
+           {
+               snprintf( ubiTmpStr, sizeof(ubiTmpStr), SYS_CLASS_UBI_PATH "/%s/mtd_num",
+                         direntPtr->d_name );
+               ubiMtdNum = - 1;
+               // Try to read the MTD number attached to this UBI
+               fdPtr = fopen( ubiTmpStr, "r" );
+               if (fdPtr)
+               {
+                   fscanf( fdPtr, "%d", &ubiMtdNum );
+                   fclose( fdPtr );
+               }
+               else
+               {
+                   // Skip if the open fails
+                   continue;
+               }
+               if (ubiMtdNum == mtdNum)
+               {
+                   if (1 == sscanf(direntPtr->d_name, "ubi%d", &ubiMtdNum))
+                   {
+                       res = LE_OK;
+                   }
+                   break;
+               }
+           }
+        }
+        closedir( dirPtr );
+    }
+    else
+    {
+        res = LE_FAULT;
+    }
+
+    if (LE_OK == res)
+    {
+        int nbUbiVol;
+
+        // The current MTD is an UBI container. Read the number of UBI volumes supported
+        snprintf( ubiTmpStr, sizeof(ubiTmpStr), SYS_CLASS_UBI_PATH "/ubi%d/volumes_count",
+                  ubiMtdNum);
+        fdPtr = fopen( ubiTmpStr, "r" );
+        if (fdPtr)
+        {
+            if (1 == fscanf( fdPtr, "%d", &nbUbiVol ))
+            {
+                *ubiIdPtr = ubiMtdNum;
+                *nbUbiVolumesPtr = nbUbiVol;
+                LE_INFO("MTD %d UBI %d Nb Volumes %d", mtdNum, ubiMtdNum, nbUbiVol);
+            }
+            else
+            {
+                LE_ERROR("Unable to read the number of UBI volumes. MTD %d UBI %d",
+                         mtdNum, ubiMtdNum);
+                res = LE_FAULT;
+            }
+            fclose( fdPtr );
+        }
+        else
+        {
+            LE_ERROR("Unable to open entry '%s'. MTD %d UBI %d: %m",
+                     ubiTmpStr, mtdNum, ubiMtdNum);
             res = LE_FAULT;
         }
     }

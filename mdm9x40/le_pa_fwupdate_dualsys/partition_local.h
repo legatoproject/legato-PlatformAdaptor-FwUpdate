@@ -110,6 +110,25 @@ le_result_t partition_CheckIfMounted
 
 //--------------------------------------------------------------------------------------------------
 /**
+ * This function checks if the partition related to the given MTD is currently an UBI container. If
+ * yes, returns the UBI Identifier and the number of volumes detected.
+ *
+ * @return
+ *      - LE_OK            The partition is an UBI container
+ *      - LE_BAD_PARAMETER The MTD number is negative, or the other parameters are NULL
+ *      - LE_FORMAT_ERROR  The partition is not an UBI container
+ *      - LE_FAULT         If an error occurs
+ */
+//--------------------------------------------------------------------------------------------------
+le_result_t partition_CheckIfUbiAndGetUbiVolumes
+(
+    int mtdNum,             ///< [IN]  MTD to check as UBI container
+    int* ubiIdPtr,          ///< [OUT] UBI identifier in case of UBI container
+    int* nbUbiVolumesPtr    ///< [OUT] Number of UBI volumes detected
+);
+
+//--------------------------------------------------------------------------------------------------
+/**
  * Check if data flashed into a partition are correctly written
  *
  * @return

@@ -30,10 +30,18 @@
 //--------------------------------------------------------------------------------------------------
 #define DEFAULT_TIMEOUT_MS     900000
 
-// File hosting the last download status
+//--------------------------------------------------------------------------------------------------
+/**
+ * File hosting the last download status
+ */
+//--------------------------------------------------------------------------------------------------
 #define EFS_DWL_STATUS_FILE "/fwupdate/dwl_status.nfo"
 
-// Record the download status
+//--------------------------------------------------------------------------------------------------
+/**
+ * Record the download status
+ */
+//--------------------------------------------------------------------------------------------------
 #define RECORD_DWL_STATUS(x)                                                          \
     do {                                                                              \
         if (LE_OK != WriteDwlStatus(x))                                               \
@@ -62,6 +70,41 @@
  */
 //--------------------------------------------------------------------------------------------------
 #define CHUNK_LENGTH 65536
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Maximum UBI volumes for DM-verity checks
+ */
+//--------------------------------------------------------------------------------------------------
+#define MAX_UBI_VOL_FOR_DM_VERITY     3
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * UBI volumes name format path into /sys
+ */
+//--------------------------------------------------------------------------------------------------
+#define SYS_UBI_VOLUME_NAME_PATH      "/sys/class/ubi/ubi%d_%d/name"
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Path to swi_auth tool used to detect SECURE BOOT and authentify the root hash
+ */
+//--------------------------------------------------------------------------------------------------
+#define SWI_AUTH_PATH                 "/usr/bin/swi_auth"
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Expected return code from swi_auth tool
+ */
+//--------------------------------------------------------------------------------------------------
+typedef enum
+{
+    SWI_NON_SECURE = 4,           ///< Non-Secure boot
+    SWI_SECURE_VERSION,           ///< Secure boot enabled
+    SWI_AUTH_SIGNATURE_SUCCEED,   ///< Root-hash authentication succeed
+    SWI_AUTH_SIGNATURE_FAILED,    ///< Root-hash authentication failed
+}
+SwiAuth_t;
 
 //--------------------------------------------------------------------------------------------------
 /**
@@ -195,6 +238,13 @@ static partition_Ctx_t PartitionCtx = {
  */
 //--------------------------------------------------------------------------------------------------
 static bool IsSyncBeforeUpdateDisabled = false;
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Running a secure boot version
+ */
+//--------------------------------------------------------------------------------------------------
+static bool IsSecureBootVersion = false;
 
 //==================================================================================================
 //                                       Private Functions
@@ -1551,6 +1601,147 @@ static le_result_t CheckFdType
     return LE_OK;
 }
 
+//--------------------------------------------------------------------------------------------------
+/**
+ * Check DM verity integrity of a MTD partition.
+ *
+ * @return
+ *      - LE_OK             The DM-verity integrity succeeded
+ *      - LE_FORMAT_ERROR   The partition is not an UBI container. Cannot check DM-verity integrity
+ *      - LE_NOT_PERMITTED  The DM-verity integrity check failed or cannot authentify the root hash
+ *      - others            Depending on the MTD/UBI PA access
+ */
+//--------------------------------------------------------------------------------------------------
+static le_result_t CheckDmVerityIntegrity
+(
+    int mtdSrc   ///< [IN] MTD number to be checked
+)
+{
+    le_result_t res;
+    int ubiId, nbUbiVol;
+
+    res = partition_CheckIfUbiAndGetUbiVolumes( mtdSrc, &ubiId, &nbUbiVol );
+    // Do not test for other error code. Just report them to the caller
+    if (LE_OK != res)
+    {
+        return res;
+    }
+
+    if (MAX_UBI_VOL_FOR_DM_VERITY <= nbUbiVol)
+    {
+        // Assume that if there are at least 3 volumes, the image belongs in volume 0
+        // with a volume name "....", the hash into volume 1 with a name "...._hs" and
+        // the root hash in volume 2 with a name "...._rhs"
+        char ubiTmpStr[PATH_MAX];
+        char ubiVol0Str[PATH_MAX];
+        FILE* ubiNameFdPtr;
+        int ubiDmVerity = 0, ubiVol0NameLen = 0, ubiTmpNameLen, ubiIndex;
+        int rc;
+        char* ubiVolSuffix[MAX_UBI_VOL_FOR_DM_VERITY] = { NULL, "_hs", "_rhs" };
+        char* rcPtr;
+
+        snprintf(ubiTmpStr, sizeof(ubiTmpStr), SYS_UBI_VOLUME_NAME_PATH, ubiId, 0);
+        ubiNameFdPtr = fopen(ubiTmpStr, "r");
+        *ubiVol0Str = '\0';
+        if (ubiNameFdPtr)
+        {
+            rcPtr = fgets(ubiVol0Str, sizeof(ubiVol0Str), ubiNameFdPtr);
+            fclose(ubiNameFdPtr);
+            if (rcPtr)
+            {
+                ubiDmVerity++;
+                ubiVol0NameLen = strlen(ubiVol0Str);
+                if ((ubiVol0NameLen > 1) && ('\n' == ubiVol0Str[ubiVol0NameLen - 1]))
+                {
+                    ubiVol0Str[ubiVol0NameLen - 1] = '\0';
+                    ubiVol0NameLen--;
+                }
+            }
+        }
+        else
+        {
+            // Do not raise error if the UBI volume name entry could not be opened as
+            // the volume index may be any integer between 0 and 127
+        }
+
+        for (ubiIndex = 1;
+             (ubiDmVerity) && (ubiIndex < MAX_UBI_VOL_FOR_DM_VERITY);
+             ubiIndex++)
+        {
+            snprintf(ubiTmpStr, sizeof(ubiTmpStr), SYS_UBI_VOLUME_NAME_PATH,
+                     ubiId, ubiIndex);
+            ubiNameFdPtr = fopen(ubiTmpStr, "r");
+            *ubiTmpStr = '\0';
+            if (ubiNameFdPtr)
+            {
+                rcPtr = fgets(ubiTmpStr, sizeof(ubiTmpStr), ubiNameFdPtr);
+                fclose(ubiNameFdPtr);
+                if (rcPtr)
+                {
+                    ubiTmpNameLen = strlen(ubiTmpStr);
+                    if ((ubiTmpNameLen > 1) && ('\n' == ubiTmpStr[ubiTmpNameLen - 1]))
+                    {
+                        ubiTmpStr[ubiTmpNameLen - 1] = '\0';
+                        ubiTmpNameLen--;
+                    }
+                    if ((ubiVol0NameLen < ubiTmpNameLen) &&
+                        (0 == strncmp(ubiVol0Str, ubiTmpStr, ubiVol0NameLen)) &&
+                        (0 == strcmp(ubiTmpStr + ubiVol0NameLen, ubiVolSuffix[ubiIndex])))
+                    {
+                        // Naming matches!
+                        ubiDmVerity++;
+                    }
+                }
+            }
+            else
+            {
+                // Do not raise error if the UBI volume name entry could not be opened as
+                // the volume index may be any integer between 0 and 127
+            }
+        }
+
+        // If all expected volume names match expected naming for DM-verity, perform the
+        // integrity check on the UBI images/hash/root hash
+        if (MAX_UBI_VOL_FOR_DM_VERITY == ubiDmVerity)
+        {
+            // Need another 4th volume on UBI for this authentication
+            if ((IsSecureBootVersion) && (MAX_UBI_VOL_FOR_DM_VERITY < nbUbiVol))
+            {
+                // Secure boot: Need to authentify the root hash of the UBI partition
+                snprintf(ubiTmpStr, sizeof(ubiTmpStr), SWI_AUTH_PATH " nfuse ubi%d",
+                         ubiId);
+                rc = system(ubiTmpStr);
+                if (WIFEXITED(rc) && (SWI_AUTH_SIGNATURE_SUCCEED == WEXITSTATUS(rc)))
+                {
+                    LE_INFO("Root hash authenfication succeed");
+                }
+                else
+                {
+                    LE_ERROR("Unable to authentify the root hash for mtd%d ubi%d: 0x%08x"
+                             " Synchronize aborted.",
+                             mtdSrc, ubiId, rc);
+                    return LE_NOT_PERMITTED;
+                }
+            }
+
+            LE_INFO("Checking DM-verity integrity on ubi%d", ubiId);
+            snprintf(ubiTmpStr, sizeof(ubiTmpStr),
+                     "/usr/sbin/veritysetup verify /dev/ubiblock%d_0 /dev/ubiblock%d_1 "
+                     "$(cat /dev/ubi%d_2)",
+                     ubiId, ubiId, ubiId);
+            rc = system(ubiTmpStr);
+            if ((0 != WEXITSTATUS(rc)) || (0 != WIFSIGNALED(rc)))
+            {
+                LE_ERROR("DM Verity check failed for mtd%d ubi%d: 0x%08x."
+                         " Synchronize aborted.",
+                         mtdSrc, ubiId, rc);
+                return LE_NOT_PERMITTED;
+            }
+        }
+    }
+    return LE_OK;
+}
+
 //==================================================================================================
 //  PUBLIC API FUNCTIONS
 //==================================================================================================
@@ -1661,6 +1852,7 @@ le_result_t pa_fwupdate_MarkGood
              dualBootSystem[PA_FWUPDATE_SUBSYSID_LINUX] + 1);
     for (idx = 0; idx < sizeof( syncPartition )/sizeof(cwe_ImageType_t); idx++) {
         int subSysId = Partition_Identifier[syncPartition[idx]].subSysId;
+
         if (-1 == (mtdSrc = partition_GetMtdFromImageType( syncPartition[idx],
                                                            false, &mtdSrcNamePtr,
                                                            &isLogicalSrc, &isDualSrc )))
@@ -1690,6 +1882,14 @@ le_result_t pa_fwupdate_MarkGood
                 LE_ERROR("Partition mtd%d is mounted or attached. Synchronize aborted.", mtdDst);
                 goto error;
             }
+        }
+
+        res = CheckDmVerityIntegrity(mtdSrc);
+        // In case of LE_FORMAT_ERROR, this is not an UBI container. Skip it
+        if ((LE_OK != res) && (LE_FORMAT_ERROR != res))
+        {
+            LE_ERROR("Error when checking for UBI on mtd%d. Synchronize aborted.", mtdSrc);
+            goto error;
         }
 
         LE_INFO( "Synchronizing %s partition \"%s%s\" (mtd%d) from \"%s%s\" (mtd%d)",
@@ -2667,6 +2867,38 @@ COMPONENT_INIT
         else
         {
             EraseResumeCtx(&ResumeCtx);
+        }
+    }
+
+    // If the swi_auth tool exists, try to detect if SECURE BOOT is enabled
+    if (0 == access(SWI_AUTH_PATH, (R_OK|X_OK)))
+    {
+        int rc;
+
+        // If this fails, we assume that we run secure!
+        rc = system(SWI_AUTH_PATH " fuse");
+        if (WIFEXITED(rc))
+        {
+            if (SWI_SECURE_VERSION == WEXITSTATUS(rc))
+            {
+                IsSecureBootVersion = true;
+            }
+            else if (SWI_NON_SECURE == WEXITSTATUS(rc))
+            {
+                IsSecureBootVersion = false;
+            }
+            else
+            {
+                LE_CRIT("Detecting SECURE BOOT returns an unexpected value: %d", WEXITSTATUS(rc));
+                LE_CRIT("Assuming SECURE BOOT");
+                IsSecureBootVersion = true;
+            }
+        }
+        else
+        {
+            LE_CRIT("Unable to detecte if SECURE BOOT is enabled: %08x", rc);
+            LE_CRIT("Assuming SECURE BOOT");
+            IsSecureBootVersion = true;
         }
     }
 }
