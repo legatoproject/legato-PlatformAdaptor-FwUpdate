@@ -2745,6 +2745,7 @@ le_result_t pa_fwupdate_GetUpdateStatus
                 }
             }
             LE_INFO("FW update status (from last download): %s", labelPtr);
+            *statusPtr = updateStatus[internalStatus];
             return LE_OK;
         }
         else
