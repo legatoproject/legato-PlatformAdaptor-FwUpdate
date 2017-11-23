@@ -1410,7 +1410,7 @@ static le_result_t partition_GetBadImageMask
     // Default value until valid mask is found
     *badImageMaskPtr = BADIMG_NDEF;
 
-    if ((CWE_IMAGE_TYPE_MIN >= imageType) || (CWE_IMAGE_TYPE_MAX <= imageType))
+    if ((CWE_IMAGE_TYPE_MIN >= imageType) || (CWE_IMAGE_TYPE_MAX < imageType))
     {
         LE_ERROR("Invalid CWE imageType %d", imageType);
         return LE_BAD_PARAMETER;
