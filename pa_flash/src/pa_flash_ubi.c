@@ -1196,6 +1196,7 @@ le_result_t pa_flash_WriteUbiAtBlock
             }
         }
         vidHdrPtr->lnum = htobe32(blk);
+        vidHdrPtr->vol_id = htobe32(descPtr->ubiVolumeId);
         if( descPtr->vtblPtr->vol_type == UBI_VID_STATIC )
         {
             vidHdrPtr->used_ebs = htobe32(reservedPebs);
