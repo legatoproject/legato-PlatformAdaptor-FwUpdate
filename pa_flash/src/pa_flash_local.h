@@ -27,6 +27,7 @@ typedef struct
     bool markBad;            ///< Mark bad block and use next to read/write...
     uint32_t lebToPeb[PA_FLASH_MAX_LEB]; ///< LEB to PEB translstion array (if scanDone)
     uint32_t ubiVolumeId;    ///< UBI volume ID if UBI, 0xFFFFFFFFU else
+    uint32_t ubiVolumeSize;  ///< UBI volume Size if UBI and static volume, 0xFFFFFFFFU else
     off_t ubiOffset;         ///< Offset of UBI data in the PEB
     struct ubi_vtbl_record vtbl[UBI_MAX_VOLUMES];     ///< Pointer to VTBL is UBI
     struct ubi_vtbl_record *vtblPtr;     ///< Pointer to VTBL is UBI

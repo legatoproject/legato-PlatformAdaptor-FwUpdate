@@ -246,6 +246,43 @@ static bool IsSyncBeforeUpdateDisabled = false;
 //--------------------------------------------------------------------------------------------------
 static bool IsSecureBootVersion = false;
 
+//--------------------------------------------------------------------------------------------------
+/**
+ * Internal partition table of the allowed partition managed.
+ */
+//--------------------------------------------------------------------------------------------------
+static pa_fwupdate_MtdPartition_t MtdPartTab[] =
+{
+    { "tz",        { "tz",        "tz",        }, PA_FWUPDATE_SUBSYSID_MODEM, true,  },
+    { "rpm",       { "rpm",       "rpm",       }, PA_FWUPDATE_SUBSYSID_MODEM, true,  },
+    { "modem",     { "modem",     "modem2",    }, PA_FWUPDATE_SUBSYSID_MODEM, false, },
+    { "aboot",     { "aboot",     "aboot2",    }, PA_FWUPDATE_SUBSYSID_LK,    false, },
+    { "boot",      { "boot",      "boot2",     }, PA_FWUPDATE_SUBSYSID_LINUX, false, },
+    { "system",    { "system",    "system2",   }, PA_FWUPDATE_SUBSYSID_LINUX, false, },
+    { "lefwkro",   { "lefwkro",   "lefwkro2",  }, PA_FWUPDATE_SUBSYSID_LINUX, false, },
+    { "customer",  { "customer0", "customer1", }, PA_FWUPDATE_SUBSYSID_LINUX, false, },
+    { "customer0", { "customer0", "customer0", }, PA_FWUPDATE_SUBSYSID_LINUX, false, },
+    { "customer1", { "customer1", "customer1", }, PA_FWUPDATE_SUBSYSID_LINUX, false, },
+    { "customer2", { "customer2", "customer2", }, PA_FWUPDATE_SUBSYSID_LINUX, false, },
+    { NULL,        { NULL,        NULL,        }, PA_FWUPDATE_SUBSYSID_NONE,  false, },
+};
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * UBI volume names, suffixes and ID. The array is terminated by the two fields ubiVolName and
+ * ubiVolSuffix set to NULL.
+ */
+//--------------------------------------------------------------------------------------------------
+static pa_fwupdate_UbiVolume_t UbiVolumeTab[] =
+{
+    { "binary",      "",      0,   },
+    { "hash_tree",   "_hs",   1,   },
+    { "root_hash",   "_rhs",  2,   },
+    { "signed_root", "_srhs", 3,   },
+    { "certificate", "_cert", 4,   },
+    { NULL,          NULL,    255, },
+};
+
 //==================================================================================================
 //                                       Private Functions
 //==================================================================================================
@@ -2902,5 +2939,51 @@ COMPONENT_INIT
             IsSecureBootVersion = true;
         }
     }
+}
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Get the MTD partition table
+ *
+ * @return
+ *      - LE_OK            on success
+ *      - LE_BAD_PARAMETER if mtdPartPtr is NULL
+ *      - LE_FAULT         on other errors
+ */
+//--------------------------------------------------------------------------------------------------
+le_result_t pa_fwupdate_GetMtdPartitionTab
+(
+    pa_fwupdate_MtdPartition_t **mtdPartPtr
+)
+{
+    if (NULL == mtdPartPtr)
+    {
+        return LE_BAD_PARAMETER;
+    }
+    *mtdPartPtr = MtdPartTab;
+    return LE_OK;
+}
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Get the UBI generic name, volume suffix and volume ID
+ *
+ * @return
+ *      - LE_OK            on success
+ *      - LE_BAD_PARAMETER if ubiVolumeTabPtr is NULL
+ *      - LE_FAULT         on other errors
+ */
+//--------------------------------------------------------------------------------------------------
+le_result_t pa_fwupdate_GetUbiVolumeTab
+(
+    pa_fwupdate_UbiVolume_t **ubiVolumeTabPtr
+)
+{
+    if (NULL == ubiVolumeTabPtr)
+    {
+        return LE_BAD_PARAMETER;
+    }
+    *ubiVolumeTabPtr = UbiVolumeTab;
+    return LE_OK;
 }
 
