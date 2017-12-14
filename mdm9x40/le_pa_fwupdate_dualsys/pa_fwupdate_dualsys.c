@@ -21,6 +21,7 @@
 #include <sys/select.h>
 #include <sys/stat.h>
 #include <netinet/in.h>
+#include "flash-ubi.h"
 
 
 //--------------------------------------------------------------------------------------------------
@@ -1825,7 +1826,7 @@ le_result_t pa_fwupdate_MarkGood
     char* mtdSrcNamePtr;
     char* mtdDstNamePtr;
     uint8_t* flashBlockPtr = NULL;
-    uint32_t crc32Src;
+    uint32_t crc32Src, dataLen;
     bool isLogicalSrc, isLogicalDst, isDualSrc, isDualDst, isUbiPartition, isRetryNeeded;
     pa_fwupdate_InternalStatus_t internalUpdateStatus;
     le_result_t res, returnedRes = LE_FAULT;
@@ -2041,21 +2042,60 @@ le_result_t pa_fwupdate_MarkGood
                     goto error;
                 }
 
+                dataLen = flashInfoSrcPtr->eraseSize;
+                if (isUbiPartition)
+                {
+                   /* Check the UBI VID magic number, if not exist then not need
+                    * to check more buffer, this block should be an empty block.
+                    * The empty block in UBI are all 0xFF except the first page.
+                    */
+                    res = pa_flash_CheckUbiMagic(flashBlockPtr + flashInfoSrcPtr->writeSize,
+                                                  UBI_VID_HDR_MAGIC);
+
+                    if(LE_BAD_PARAMETER == res)
+                    {
+                        LE_ERROR("pa_flash_CheckUbiMagic, parameter input not correct.");
+                        goto error;
+                    }
+                    else if (LE_NOT_FOUND == res)
+                    {
+                        dataLen = flashInfoSrcPtr->writeSize;
+                    }
+                    else
+                    {
+                       /* Calculate the real length of the data in read buffer
+                        * and then write the real data to the target block.
+                        */
+                        if (LE_OK != pa_flash_CalculateDataLength(flashInfoSrcPtr->writeSize,
+                                                                  flashBlockPtr,
+                                                                  &dataLen))
+                        {
+                            LE_ERROR("pa_CalculateDataLength, parameter input not correct.");
+                            goto error;
+                        }
+                    }
+                }
+
                 if (LE_OK != pa_flash_EraseBlock( flashFdDst, nbBlk ))
                 {
                     LE_ERROR("EraseMtd fails for block %d: %m", nbBlk);
                     goto error;
                 }
+
                 if (LE_OK != pa_flash_WriteAtBlock( flashFdDst,
                                                     nbBlk,
                                                     flashBlockPtr,
-                                                    flashInfoDstPtr->eraseSize ))
+                                                    dataLen ))
                 {
                     LE_ERROR("pa_flash_Write fails for block %d: %m", nbBlk);
                     goto error;
                 }
                 else
                 {
+                   /* Here calculate the CRC with erase block by erase block, and later will also check
+                    * CRC agian with erase block by erase block, not only real data, all other data
+                    * behind the real data is 0xFF.
+                    */
                     crc32Src = le_crc_Crc32(flashBlockPtr, flashInfoSrcPtr->eraseSize, crc32Src);
                     nbSrcBlkCnt ++;
                 }

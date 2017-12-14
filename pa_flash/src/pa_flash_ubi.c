@@ -1639,3 +1639,76 @@ le_result_t pa_flash_GetUbiInfo
     *volSizePtr = descPtr->ubiVolumeSize;
     return LE_OK;
 }
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * pa_flash_CheckUbiMagic - check if the buffer contains the UBI magic number
+ *
+ * @return
+ *      - LE_OK             On success and found the magic number in buffer
+ *      - LE_NOT_FOUND      Cannot find the magic number in buffer
+ *      - LE_BAD_PARAMETER  If desc is NULL or is not a valid descriptor
+ */
+//--------------------------------------------------------------------------------------------------
+le_result_t pa_flash_CheckUbiMagic
+(
+    void *data,          ///< [IN] buffer to check
+    uint32_t pattern     ///< [IN] the pattern to check
+)
+{
+    struct ubi_vid_hdr *vidHdrPtr;
+
+    if( (!pattern)|| (!data) )
+    {
+        return LE_BAD_PARAMETER;
+    }
+
+    vidHdrPtr = (struct ubi_vid_hdr *)data;
+    if (pattern != be32toh(vidHdrPtr->magic))
+    {
+        return LE_NOT_FOUND;
+    }
+    return LE_OK;
+}
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * pa_flash_CalculateDataLength - calculate how much real data is stored in the buffer
+ *
+ * This function calculates how much "real data" is stored in @data and
+ * returns the length @dataSize (align with pages size). Continuous 0xFF bytes at the end
+ * of the buffer are not considered as "real data".
+ *
+ * @return
+ *      - LE_OK             On success
+ *      - LE_BAD_PARAMETER  If desc is NULL or is not a valid descriptor
+ */
+//--------------------------------------------------------------------------------------------------
+le_result_t pa_flash_CalculateDataLength
+(
+    int pageSize,      ///< [IN] min I/O of the device
+    const void *data,  ///< [IN] a buffer with the contents of the physical eraseblock
+    uint32_t *dataSize ///< [INOUT] input : the buffer length
+                       ///<         output: real data length align with pages size
+)
+{
+    int i, size;
+
+    if( (!pageSize) || (!dataSize) || (!data) )
+    {
+        return LE_BAD_PARAMETER;
+    }
+
+    for (i = *dataSize - 1; i >= 0; i--)
+    {
+        if (((const uint8_t *)data)[i] != 0xFF)
+        {
+            break;
+        }
+    }
+
+    /* The resulting length must be aligned to the minimum flash I/O size */
+    size = i + 1;
+    *dataSize = ((size + pageSize - 1) / pageSize) * pageSize;
+    return LE_OK;
+}
