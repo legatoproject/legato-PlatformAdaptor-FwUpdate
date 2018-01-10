@@ -18,6 +18,8 @@
 #include "deltaUpdate_local.h"
 #include "partition_local.h"
 #include "interfaces.h"
+#include "watchdogChain.h"
+#include "fwupdate_local.h"
 #include <sys/select.h>
 #include <sys/stat.h>
 #include <netinet/in.h>
@@ -2275,6 +2277,8 @@ le_result_t pa_fwupdate_Download
         goto error;
     }
 
+    le_clk_Time_t startTime = le_clk_GetAbsoluteTime();
+
     ResumeCtxSave_t *saveCtxPtr = &ResumeCtx.saveCtx;
 
     result = RequestSwUpdate();
@@ -2451,6 +2455,18 @@ le_result_t pa_fwupdate_Download
             EraseResumeCtx(&ResumeCtx);
             break;
         }
+        else
+        {
+            //Reset Watchdog if it isn't done for certain time interval
+            le_clk_Time_t curTime = le_clk_GetAbsoluteTime();
+            le_clk_Time_t diffTime = le_clk_Sub(curTime, startTime);
+            if (diffTime.sec >= FWUPDATE_WDOG_KICK_INTERVAL)
+            {
+                LE_DEBUG("Kicking watchdog");
+                startTime = curTime;
+                le_wdogChain_Kick(FWUPDATE_WDOG_TIMER);
+            }
+        }
     }
 
     ReleaseSwUpdate();
@@ -2498,6 +2514,8 @@ error_noswupdatecomplete:
     result = (LE_OK == result) ? LE_FAULT : result;
     if (LE_FAULT == result)
     {
+        LE_DEBUG("Kicking watchdog");
+        le_wdogChain_Kick(FWUPDATE_WDOG_TIMER);
         pa_fwupdate_InitDownload();
         // don't care to the result we're already in error treatment
     }
