@@ -26,14 +26,33 @@
  * "/sys/class/ubi" access path
  */
 //--------------------------------------------------------------------------------------------------
+#ifdef LEGATO_EMBEDDED
 #define SYS_CLASS_UBI_PATH     "/sys/class/ubi"
+#else
+#define SYS_CLASS_UBI_PATH     "/tmp"
+#endif
 
 //--------------------------------------------------------------------------------------------------
 /**
  * "/sys/class/mtd" access path
  */
 //--------------------------------------------------------------------------------------------------
+#ifdef LEGATO_EMBEDDED
 #define SYS_CLASS_MTD_PATH     "/sys/class/mtd"
+#else
+#define SYS_CLASS_MTD_PATH     "/tmp"
+#endif
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * "/sys/class/mtd" access path
+ */
+//--------------------------------------------------------------------------------------------------
+#ifdef LEGATO_EMBEDDED
+#define PROC_MTD_PATH          "/proc/mtd"
+#else
+#define PROC_MTD_PATH          "/tmp/mtd"
+#endif
 
 //--------------------------------------------------------------------------------------------------
 /**
@@ -448,7 +467,7 @@ int partition_GetMtdFromImageType
     l = strlen( mtdFetchName );
 
     // Open the /proc/mtd partition
-    if (NULL == (flashFdPtr = fopen( "/proc/mtd", "r" )))
+    if (NULL == (flashFdPtr = fopen(PROC_MTD_PATH, "r")))
     {
         LE_ERROR( "fopen on /proc/mtd failed: %m" );
         return -1;

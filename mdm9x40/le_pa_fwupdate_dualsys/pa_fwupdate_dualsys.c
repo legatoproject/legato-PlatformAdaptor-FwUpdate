@@ -38,7 +38,11 @@
  * File hosting the last download status
  */
 //--------------------------------------------------------------------------------------------------
+#ifdef LEGATO_EMBEDDED
 #define EFS_DWL_STATUS_FILE "/fwupdate/dwl_status.nfo"
+#else
+#define EFS_DWL_STATUS_FILE "/tmp/dwl_status.nfo"
+#endif
 
 //--------------------------------------------------------------------------------------------------
 /**
@@ -65,7 +69,11 @@
  * Define the resume context filename
  */
 //--------------------------------------------------------------------------------------------------
+#ifdef LEGATO_EMBEDDED
 #define RESUME_CTX_FILENAME "/fwupdate/fwupdate_ResumeCtx_"
+#else
+#define RESUME_CTX_FILENAME "/tmp/data/le_fs/fwupdate_ResumeCtx_"
+#endif
 
 //--------------------------------------------------------------------------------------------------
 /**
