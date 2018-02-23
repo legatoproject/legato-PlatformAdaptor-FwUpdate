@@ -164,10 +164,14 @@ COMPONENT_INIT
         LE_ASSERT(0 < fprintf(flashFdPtr, "%d", data[iUbi]));
         fseek(flashFdPtr, 0L, SEEK_SET);
 
+        LE_ASSERT(0 == fclose(flashFdPtr));
+
         snprintf(mtdPath, sizeof(mtdPath), SYS_CLASS_UBI_PATH "/mtd%d/name", iUbi);
         LE_ASSERT((NULL != (flashFdPtr = fopen(mtdPath, "w+"))));
         LE_ASSERT(0 < fprintf(flashFdPtr, "%s", mtdFetchName[iUbi]));
         fseek(flashFdPtr, 0L, SEEK_SET);
+
+        LE_ASSERT(0 == fclose(flashFdPtr));
     }
 
     LE_INFO("Ubi files are created successfully.");

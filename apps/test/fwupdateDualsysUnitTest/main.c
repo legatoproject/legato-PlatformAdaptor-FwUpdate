@@ -74,7 +74,7 @@ static void Testpa_fwupdate_Download
         exit(EXIT_FAILURE);
     }
 
-    fd = open(TEST_FILE, O_RDWR | O_CREAT);
+    fd = open(TEST_FILE, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
     pa_fwupdateSimu_SetSystemState(true);
     pa_fwupdate_DisableSyncBeforeUpdate(true);
     LE_ASSERT(LE_CLOSED == pa_fwupdate_Download(fd));

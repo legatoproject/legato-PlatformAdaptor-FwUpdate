@@ -570,7 +570,11 @@ le_result_t partition_CheckIfMounted
                fdPtr = fopen( ubiMtdNumStr, "r" );
                if (fdPtr)
                {
-                   fscanf( fdPtr, "%d", &ubiMtdNum );
+                   if (EOF == fscanf(fdPtr, "%d", &ubiMtdNum))
+                   {
+                       LE_ERROR("error while reading the MTD number %m");
+                   }
+
                    fclose( fdPtr );
                }
                else
@@ -669,7 +673,11 @@ le_result_t partition_CheckIfUbiAndGetUbiVolumes
                fdPtr = fopen( ubiTmpStr, "r" );
                if (fdPtr)
                {
-                   fscanf( fdPtr, "%d", &ubiMtdNum );
+                   if (EOF == fscanf(fdPtr, "%d", &ubiMtdNum))
+                   {
+                       LE_ERROR("error while reading the MTD number %m");
+                   }
+
                    fclose( fdPtr );
                }
                else
@@ -768,7 +776,7 @@ le_result_t partition_CheckData
         mode |= ((isDual) ? PA_FLASH_OPENMODE_LOGICAL_DUAL : PA_FLASH_OPENMODE_LOGICAL);
     }
 
-    LE_DEBUG( "Size=%d, Crc32=0x%08x", sizeToCheck, crc32ToCheck);
+    LE_DEBUG( "Size=%zu, Crc32=0x%08X", sizeToCheck, crc32ToCheck);
 
     checkBlockPtr = (uint8_t *) le_mem_ForceAlloc(flashImgPool);
 
@@ -903,7 +911,7 @@ le_result_t partition_WriteDataSBL
 
     mtdNum = partition_GetMtdFromImageType( hdrPtr->imageType, true, &MtdNamePtr, NULL, NULL );
 
-    LE_DEBUG("image type %d len %d offset 0x%x", hdrPtr->imageType, length, offset);
+    LE_DEBUG("image type %zu len %zu offset 0x%zx", hdrPtr->imageType, length, offset);
 
     if (-1 == mtdNum)
     {
@@ -922,7 +930,7 @@ le_result_t partition_WriteDataSBL
     // Check that SBL is not greater than the max block for the partition.
     if (sblNbBlk > (flashInfo.nbBlk / 2))
     {
-        LE_ERROR("SBL is too big: %d (nbBlock %d)",
+        LE_ERROR("SBL is too big: %u (nbBlock %u)",
                  ImageSize, (ImageSize / flashInfo.eraseSize));
         goto error;
     }
@@ -941,7 +949,7 @@ le_result_t partition_WriteDataSBL
     // Check that the chunk is inside the SBL temporary image
     if ((offset + length) > ImageSize)
     {
-        LE_ERROR("SBL image size and offset/length mismatch: %u < %u+%u",
+        LE_ERROR("SBL image size and offset/length mismatch: %u < %zu+%zu",
                  ImageSize, offset, length);
         goto error;
     }
@@ -1247,7 +1255,7 @@ le_result_t partition_WriteUpdatePartition
         goto error;
     }
 
-    LE_DEBUG ("image type %d len %d offset 0x%x", hdrPtr->imageType, length, offset);
+    LE_DEBUG ("image type %zu len %zu offset 0x%zx", hdrPtr->imageType, length, offset);
 
     if ((NULL == MtdFd) && (0 == ImageSize) )
     {

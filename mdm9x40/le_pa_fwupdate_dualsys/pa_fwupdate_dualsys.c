@@ -334,8 +334,8 @@ static le_result_t UpdateResumeCtx
             LE_DEBUG("            currentImageCrc 0x%x totalRead %d currentOffset 0x%x,",
                      resumeCtxPtr->saveCtx.currentImageCrc,resumeCtxPtr->saveCtx.totalRead,
                      resumeCtxPtr->saveCtx.currentOffset);
-            LE_DEBUG("            fullImageLength %d isFirstNvupDownloaded %d isModemDownloaded %d "
-                     "ctxCrc 0x%x",
+            LE_DEBUG("            fullImageLength %zd isFirstNvupDownloaded %d "
+                     "isModemDownloaded %d " "ctxCrc 0x%08" PRIx32,
                      resumeCtxPtr->saveCtx.fullImageLength,
                      resumeCtxPtr->saveCtx.isFirstNvupDownloaded,
                      resumeCtxPtr->saveCtx.isModemDownloaded, resumeCtxPtr->saveCtx.ctxCrc);
@@ -538,11 +538,12 @@ static le_result_t GetResumeCtx
                 LE_DEBUG("resumeCtx: ctxCounter %d, imageType %d, imageSize %d, imageCrc 0x%x,",
                          resumeCtxPtr->saveCtx.ctxCounter, resumeCtxPtr->saveCtx.imageType,
                          resumeCtxPtr->saveCtx.imageSize, resumeCtxPtr->saveCtx.imageCrc);
-                LE_DEBUG("           currentImageCrc 0x%x totalRead %d currentOffset 0x%x,",
+                LE_DEBUG("           currentImageCrc 0x%08" PRIx32 "totalRead %zu "
+                         "currentOffset 0x%08" PRIx32,
                          resumeCtxPtr->saveCtx.currentImageCrc,resumeCtxPtr->saveCtx.totalRead,
                          resumeCtxPtr->saveCtx.currentOffset);
-                LE_DEBUG("           fullImageLength %d isFirstNvupDownloaded %d "
-                         "isModemDownloaded %d ctxCrc 0x%x",
+                LE_DEBUG("           fullImageLength %zd isFirstNvupDownloaded %d "
+                         "isModemDownloaded %d ctxCrc 0x%08" PRIx32,
                          resumeCtxPtr->saveCtx.fullImageLength,
                          resumeCtxPtr->saveCtx.isFirstNvupDownloaded,
                          resumeCtxPtr->saveCtx.isModemDownloaded, resumeCtxPtr->saveCtx.ctxCrc);
@@ -731,7 +732,7 @@ static le_result_t WriteData
 
     if (!forceClose)
     {
-        LE_DEBUG ("image type %d len %d offset 0x%x", hdrPtr->imageType, length, offset);
+        LE_DEBUG ("image type %zu len %zu offset 0x%zx", hdrPtr->imageType, length, offset);
     }
 
     if (isFlashedPtr)
@@ -851,7 +852,7 @@ static ssize_t LengthToRead
             }
         }
     }
-    LE_DEBUG("readCount=%d", readCount);
+    LE_DEBUG("readCount=%zd", readCount);
     return readCount;
 }
 
@@ -1047,7 +1048,7 @@ static le_result_t ParseCweHeader
         saveCtxPtr->fullImageLength = CurrentCweHeader.imageSize + CWE_HEADER_SIZE;
         saveCtxPtr->globalCrc = CurrentCweHeader.crc32;
         saveCtxPtr->currentGlobalCrc = LE_CRC_START_CRC32;
-        LE_DEBUG("New CWE: fullImageLength = %u, CRC=0x%x", saveCtxPtr->fullImageLength,
+        LE_DEBUG("New CWE: fullImageLength = %zd, CRC=0x%08" PRIx32, saveCtxPtr->fullImageLength,
                  saveCtxPtr->globalCrc);
     }
     else
@@ -2263,7 +2264,6 @@ le_result_t pa_fwupdate_Download
     LE_DEBUG ("fd %d", fd);
     if ((fd < 0) || (LE_OK != CheckFdType(fd, &isRegularFile)))
     {
-        updateStatus = PA_FWUPDATE_INTERNAL_STATUS_DWL_FAILED;
         LE_ERROR ("bad parameter");
         result = LE_BAD_PARAMETER;
         goto error;
