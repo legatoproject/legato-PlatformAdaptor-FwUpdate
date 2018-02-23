@@ -8,6 +8,8 @@
  *
  */
 
+#include <sys/time.h>
+
 #include "legato.h"
 #include "cwe_local.h"
 #include "partition_local.h"
@@ -76,6 +78,15 @@
  */
 //--------------------------------------------------------------------------------------------------
 #define BADIMG_NDEF 0x0
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Delay to wait before running the CRC computation on a erase block. This is to prevent lack
+ * of CPU resources and hardware watchdog elapses.
+ * This 1 milli-second in nano-seconds.
+ */
+//--------------------------------------------------------------------------------------------------
+#define SUSPEND_DELAY (1000000)
 
 //==================================================================================================
 //                                       Static variables
@@ -530,7 +541,6 @@ le_result_t partition_CheckIfMounted
 {
     DIR* dirPtr;
     struct dirent *direntPtr;
-    uint8_t direntTab[offsetof(struct dirent, d_name) + PATH_MAX + 1];
     FILE* fdPtr;
     int  ubiMtdNum = - 1;
     char ubiMtdNumStr[PATH_MAX];
@@ -546,7 +556,6 @@ le_result_t partition_CheckIfMounted
     dirPtr = opendir( SYS_CLASS_UBI_PATH );
     if (dirPtr)
     {
-        direntPtr = (struct dirent *)&direntTab;
         // Read all entries in the directory
         while ((NULL != (direntPtr = readdir( dirPtr ))))
         {
@@ -629,7 +638,6 @@ le_result_t partition_CheckIfUbiAndGetUbiVolumes
 {
     DIR* dirPtr;
     struct dirent *direntPtr;
-    uint8_t direntTab[offsetof(struct dirent, d_name) + PATH_MAX + 1];
     FILE* fdPtr;
     int  ubiMtdNum = - 1;
     char ubiTmpStr[PATH_MAX];
@@ -647,7 +655,6 @@ le_result_t partition_CheckIfUbiAndGetUbiVolumes
     dirPtr = opendir( SYS_CLASS_UBI_PATH );
     if (dirPtr)
     {
-        direntPtr = (struct dirent *)&direntTab;
         // Read all entries in the directory
         while ((NULL != (direntPtr = readdir( dirPtr ))))
         {
@@ -753,6 +760,7 @@ le_result_t partition_CheckData
     pa_flash_Info_t* flashInfoPtr;
     pa_flash_EccStats_t flashEccStats;
     pa_flash_OpenMode_t mode = PA_FLASH_OPENMODE_READONLY;
+    struct timespec suspendDelay = { 0, SUSPEND_DELAY }; // 1 ms.
     le_result_t res;
 
     if (isLogical)
@@ -783,6 +791,14 @@ le_result_t partition_CheckData
         size = (((imageSize + flashInfoPtr->eraseSize) < sizeToCheck)
                    ? flashInfoPtr->eraseSize
                    : (sizeToCheck - imageSize));
+
+        // As we will compute a CRC for a big amount of memory, we need to give time for others
+        // processes to schedule and also to prevent the hardware watchdog to elapse.
+        if ((-1 == nanosleep(&suspendDelay, NULL)) && (EINTR != errno))
+        {
+            LE_ERROR("nanosleep(%ld.%ld) fails: %m", suspendDelay.tv_sec, suspendDelay.tv_nsec);
+        }
+
         LE_DEBUG("Read %d at offset 0x%lx, block offset 0x%llx", size, offset, blkOff);
         if (LE_OK != pa_flash_SeekAtBlock( flashFd,
                                            ((off_t)blkOff / flashInfoPtr->eraseSize) ))
@@ -1024,7 +1040,6 @@ le_result_t partition_WriteDataSBL
             // First block used as base to flash the SBL
             atBlk = (!pass ? (sblBlk ? 0 : flashInfo.nbBlk / 2)
                            : (sblBlk ? flashInfo.nbBlk / 2 : 0));
-            atOffset = atBlk * flashInfo.eraseSize;
 
             // Last block of the SBL half partition
             atMaxBlk = atBlk + (flashInfo.nbBlk / 2);
@@ -1149,7 +1164,6 @@ le_result_t partition_WriteDataSBL
             // Do low and high or high and low: 2 passes
         } while (++pass < SBL_MAX_PASS);
 
-        atOffset = (sblBlk ? 0 : flashInfo.nbBlk / 2) * flashInfo.eraseSize;
         for (atBlk = 0; atBlk < flashInfo.nbBlk / 2; atBlk++)
         {
             pa_flash_EraseBlock( flashFd, atBlk + (sblBlk ? 0 : flashInfo.nbBlk / 2) );
