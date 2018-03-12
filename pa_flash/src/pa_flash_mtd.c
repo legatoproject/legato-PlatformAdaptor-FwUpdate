@@ -372,6 +372,7 @@ le_result_t pa_flash_Open
     }
     // Allocate and fill the MTD descriptor
     mtdDescPtr = (pa_flash_MtdDesc_t*)le_mem_ForceAlloc(FlashMtdDescPool);
+    memset(mtdDescPtr, 0, sizeof(pa_flash_MtdDesc_t));
     mtdDescPtr->fd = fd;
     mtdDescPtr->mtdNum = mtdNum;
     mtdDescPtr->scanDone = false;
@@ -385,6 +386,7 @@ le_result_t pa_flash_Open
     }
 
     mtdDescPtr->mtdInfo.ubi = isUbi;
+    mtdDescPtr->ubiVolumeId = (uint32_t)-1;
     // Clear the LEB to PEB array
     memset( &(mtdDescPtr->lebToPeb), -1, sizeof(mtdDescPtr->lebToPeb));
 

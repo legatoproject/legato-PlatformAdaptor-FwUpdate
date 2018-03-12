@@ -13,6 +13,22 @@
 #include "pa_flash.h"
 #include "pa_flash_local.h"
 
+// Need some internal config values from the kernel configuration
+// Because there is no entry in /sys or /proc to read these values
+#include <linux/../../src/kernel/include/generated/autoconf.h>
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Maximum expected bad eraseblock count per 1024 eraseblocks on the whole MTD device.
+ * By default, the value is 20.
+ */
+//--------------------------------------------------------------------------------------------------
+#ifdef CONFIG_MTD_UBI_BEB_LIMIT
+#define UBI_BEB_LIMIT CONFIG_MTD_UBI_BEB_LIMIT
+#else
+#define UBI_BEB_LIMIT 20
+#endif
+
 //--------------------------------------------------------------------------------------------------
 /**
  * Setting the invalidity of the PEB (valid values from 0 to N)
@@ -74,6 +90,61 @@ static void UpdateVolFreeSize
 {
     infoPtr->ubiVolFreeSize = infoPtr->ubiPebFreeCount * (infoPtr->eraseSize -
                                                           (PEB_HDR_NB_BLOCKS * infoPtr->writeSize));
+}
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Create a new EC header
+ */
+//--------------------------------------------------------------------------------------------------
+static void CreateEcHeader
+(
+    pa_flash_MtdDesc_t* descPtr,          ///< [IN] Private flash descriptor
+    struct ubi_ec_hdr* ecHdrPtr           ///< [IN] Pointer to a UBI EC header
+)
+{
+    pa_flash_Info_t* infoPtr = &descPtr->mtdInfo;
+    uint32_t crc;
+
+    memset(ecHdrPtr, 0, sizeof(struct ubi_ec_hdr));
+    ecHdrPtr->magic = htobe32(UBI_EC_HDR_MAGIC);
+    ecHdrPtr->version = UBI_VERSION;
+    ecHdrPtr->vid_hdr_offset = htobe32(infoPtr->writeSize);
+    ecHdrPtr->data_offset = htobe32(2 * infoPtr->writeSize);
+    ecHdrPtr->image_seq = htobe32(UBI_IMAGE_SEQ_BASE);
+    crc = le_crc_Crc32( (uint8_t *)ecHdrPtr, UBI_EC_HDR_SIZE_CRC, LE_CRC_START_CRC32 );
+    ecHdrPtr->hdr_crc = htobe32(crc);
+
+}
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Create a VID header with the volume ID
+ */
+//--------------------------------------------------------------------------------------------------
+static void CreateVidHeader
+(
+    pa_flash_MtdDesc_t* descPtr,          ///< [IN] Private flash descriptor
+    struct ubi_vid_hdr* vidHdrPtr,        ///< [IN] Pointer to a UBI VID header
+    uint32_t            leb,              ///< [IN] Logical block number in the volume chain
+    uint32_t            reservedPebs      ///< [IN] Number of blocks reserved for the volume
+)
+{
+    uint32_t crc;
+
+    // Create a new VID header with the volume ID
+    memset(vidHdrPtr, 0, sizeof(struct ubi_vid_hdr));
+    vidHdrPtr->magic = htobe32(UBI_VID_HDR_MAGIC);
+    vidHdrPtr->version = UBI_VERSION;
+    vidHdrPtr->vol_type = descPtr->vtblPtr->vol_type;
+    vidHdrPtr->vol_id = htobe32(descPtr->ubiVolumeId);
+    vidHdrPtr->lnum = htobe32(leb);
+    if( descPtr->vtblPtr->vol_type == UBI_VID_STATIC )
+    {
+        vidHdrPtr->used_ebs = htobe32(reservedPebs);
+    }
+    crc = le_crc_Crc32( (uint8_t *)vidHdrPtr, UBI_VID_HDR_SIZE_CRC, LE_CRC_START_CRC32 );
+    vidHdrPtr->hdr_crc = htobe32(crc);
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -1009,14 +1080,27 @@ le_result_t pa_flash_ScanUbi
             {
                 descPtr->vtblPeb[iVtblPeb++] = peb;
             }
+            if( (2 == iVtblPeb) &&
+                (be16toh(descPtr->vtbl[ubiVolId].name_len)) &&
+                ((UBI_VID_STATIC == descPtr->vtbl[ubiVolId].vol_type) ||
+                 (UBI_VID_DYNAMIC == descPtr->vtbl[ubiVolId].vol_type)))
+            {
+                descPtr->vtblPtr = &(descPtr->vtbl[ubiVolId]);
+            }
         }
         else if ((be32toh(vidHeader.vol_id) < PA_FLASH_UBI_MAX_VOLUMES) &&
                  (be32toh(vidHeader.vol_id) == ubiVolId))
         {
             descPtr->ubiOffset = be32toh(ecHeader.data_offset);
             descPtr->lebToPeb[be32toh(vidHeader.lnum)] = peb;
-            descPtr->vtblPtr = &(descPtr->vtbl[ubiVolId]);
-            ubiVolSize += be32toh(vidHeader.data_size);
+            if( UBI_VID_STATIC == vidHeader.vol_type )
+            {
+                ubiVolSize += be32toh(vidHeader.data_size);
+            }
+            else
+            {
+                ubiVolSize += (descPtr->mtdInfo.eraseSize - (2 * descPtr->mtdInfo.writeSize));
+            }
         }
         else if (ERASED_VALUE_32 == be32toh(vidHeader.vol_id))
         {
@@ -1170,7 +1254,8 @@ le_result_t pa_flash_ReadUbiAtBlock
             ? (descPtr->mtdInfo.eraseSize - descPtr->ubiOffset)
             : *dataSizePtr;
     realSize = ((nbLeb - 1) == leb)
-                  ? descPtr->ubiVolumeSize % (descPtr->mtdInfo.eraseSize - descPtr->ubiOffset)
+                  ? descPtr->ubiVolumeSize -
+                       ((descPtr->mtdInfo.eraseSize - descPtr->ubiOffset) * (nbLeb - 1))
                   : size;
     LE_DEBUG("LEB %u (nbLEB %u) size %u realSize %u", leb, nbLeb, size, realSize);
     if (realSize > size)
@@ -1293,54 +1378,11 @@ le_result_t pa_flash_WriteUbiAtBlock
         ecHdrPtr = (struct ubi_ec_hdr *)blockPtr;
         if( INVALID_ERASECOUNTER == eraseCount )
         {
-            blkOff = descPtr->lebToPeb[0] * infoPtr->eraseSize;
-            LE_DEBUG("read UBI block : LEB %d PEB %d (at %lx)",
-                    0, descPtr->lebToPeb[0], blkOff);
-            LE_DEBUG("Read blk %d, size %lx at %lx",
-                    0, dataOffset, blkOff );
-            res = pa_flash_SeekAtOffset( desc, blkOff );
-            if (LE_OK != res)
-            {
-                goto error;
-            }
-            res = pa_flash_Read( desc,
-                                 blockPtr,
-                                 dataOffset);
-            if (LE_OK != res)
-            {
-                goto error;
-            }
+            CreateEcHeader(descPtr, ecHdrPtr);
         }
+
         vidHdrPtr = (struct ubi_vid_hdr *)(blockPtr + be32toh(ecHdrPtr->vid_hdr_offset));
-        if( ERASED_VALUE_32 == vidHdrPtr->magic )
-        {
-            blkOff = descPtr->lebToPeb[0] * infoPtr->eraseSize;
-            blkOff += be32toh(ecHdrPtr->vid_hdr_offset);
-            LE_DEBUG("read UBI block : LEB %d PEB %d (at %lx)",
-                    0, descPtr->lebToPeb[0], blkOff);
-            LE_DEBUG("Read blk %d, size %lx at %lx",
-                    0, dataOffset, blkOff );
-            res = pa_flash_SeekAtOffset( desc, blkOff );
-            if (LE_OK != res)
-            {
-                goto error;
-            }
-            res = pa_flash_Read( desc,
-                                 (uint8_t*)vidHdrPtr,
-                                 infoPtr->writeSize);
-            if (LE_OK != res)
-            {
-                goto error;
-            }
-        }
-        vidHdrPtr->lnum = htobe32(blk);
-        vidHdrPtr->vol_id = htobe32(descPtr->ubiVolumeId);
-        if( descPtr->vtblPtr->vol_type == UBI_VID_STATIC )
-        {
-            vidHdrPtr->used_ebs = htobe32(reservedPebs);
-        }
-        crc = le_crc_Crc32( (uint8_t *)vidHdrPtr, UBI_VID_HDR_SIZE_CRC, LE_CRC_START_CRC32 );
-        vidHdrPtr->hdr_crc = htobe32(crc);
+        CreateVidHeader(descPtr, vidHdrPtr, blk, reservedPebs);
         descPtr->vtblPtr->reserved_pebs = htobe32(reservedPebs);
         descPtr->lebToPeb[blk] = ieb;
         blkOff = descPtr->lebToPeb[blk] * infoPtr->eraseSize;
@@ -1381,48 +1423,42 @@ le_result_t pa_flash_WriteUbiAtBlock
             ecHdrPtr = (struct ubi_ec_hdr *)blockPtr;
             if( INVALID_ERASECOUNTER == eraseCount )
             {
-                blkOff = descPtr->lebToPeb[0] * infoPtr->eraseSize;
-                LE_DEBUG("read UBI block : LEB %d PEB %d (at %lx)",
-                        0, descPtr->lebToPeb[0], blkOff);
-                LE_DEBUG("Read blk %d, size %lx at %lx",
-                        0, dataOffset, blkOff );
-                res = pa_flash_SeekAtOffset( desc, blkOff );
-                if (LE_OK != res)
-                {
-                    goto error;
-                }
-                res = pa_flash_Read( desc,
-                                     blockPtr,
-                                     dataOffset);
-                if (LE_OK != res)
-                {
-                    goto error;
-                }
-                ecHdrPtr = (struct ubi_ec_hdr *)blockPtr;
-                ecHdrPtr->ec = 0;
+                CreateEcHeader(descPtr, ecHdrPtr);
+
+                vidHdrPtr = (struct ubi_vid_hdr*)(blockPtr + be32toh(ecHdrPtr->vid_hdr_offset));
+                CreateVidHeader(descPtr, vidHdrPtr, blk, be32toh(descPtr->vtblPtr->reserved_pebs));
             }
             else
             {
-                blkOff = descPtr->lebToPeb[blk] * infoPtr->eraseSize;
-                blkOff += infoPtr->writeSize;
-                LE_DEBUG("read UBI block : LEB %d PEB %d (at %lx)",
-                         blk, descPtr->lebToPeb[blk], blkOff);
-                LE_DEBUG("Read blk %d, size %lx at %lx",
-                        blk, dataOffset, blkOff );
-                res = pa_flash_SeekAtOffset( desc, blkOff );
-                if (LE_OK != res)
+                if( INVALID_PEB != descPtr->lebToPeb[blk] )
                 {
-                    goto error;
+                    blkOff = descPtr->lebToPeb[blk] * infoPtr->eraseSize;
+                    blkOff += infoPtr->writeSize;
+                    LE_DEBUG("read UBI block : LEB %d PEB %d (at %lx)",
+                             blk, descPtr->lebToPeb[blk], blkOff);
+                    LE_DEBUG("Read blk %d, size %lx at %lx",
+                            blk, dataOffset, blkOff );
+                    res = pa_flash_SeekAtOffset( desc, blkOff );
+                    if (LE_OK != res)
+                    {
+                        goto error;
+                    }
+                    res = pa_flash_Read(desc,
+                                        blockPtr + infoPtr->writeSize,
+                                        dataOffset - infoPtr->writeSize);
+                    if (LE_OK != res)
+                    {
+                        goto error;
+                    }
+                    pebErase = descPtr->lebToPeb[blk];
                 }
-                res = pa_flash_Read( desc,
-                                     blockPtr + infoPtr->writeSize,
-                                     dataOffset - infoPtr->writeSize);
-                if (LE_OK != res)
+                else
                 {
-                    goto error;
+                    // Create a VID header with the volume ID
+                    vidHdrPtr = (struct ubi_vid_hdr*)(blockPtr + be32toh(ecHdrPtr->vid_hdr_offset));
+                    CreateVidHeader(descPtr, vidHdrPtr, blk, be32toh(descPtr->vtblPtr->reserved_pebs));
                 }
             }
-            pebErase = descPtr->lebToPeb[blk];
             descPtr->lebToPeb[blk] = newBlk;
             blkOff = descPtr->lebToPeb[blk] * infoPtr->eraseSize;
         }
@@ -1795,13 +1831,7 @@ le_result_t pa_flash_CreateUbi
         if ((LE_FORMAT_ERROR == res) || (LE_UNSUPPORTED == res))
         {
             // Create a new EC header
-            memset(ecHeaderPtr, 0, sizeof(struct ubi_ec_hdr));
-            ecHeaderPtr->magic = htobe32(UBI_EC_HDR_MAGIC);
-            ecHeaderPtr->version = UBI_VERSION;
-            ecHeaderPtr->vid_hdr_offset = htobe32(infoPtr->writeSize);
-            ecHeaderPtr->data_offset = htobe32(2 * infoPtr->writeSize);
-            ecHeaderPtr->image_seq = htobe32(UBI_IMAGE_SEQ_BASE);
-            UpdateEraseCounter(descPtr, ecHeaderPtr);
+            CreateEcHeader(descPtr, ecHeaderPtr);
         }
         else if (LE_OK == res)
         {
@@ -1956,6 +1986,7 @@ error:
  *      - LE_FORMAT_ERROR  If the flash is not in UBI format
  *      - LE_DUPLICATE     If the volume name or volume ID already exists
  *      - LE_IO_ERROR      If a flash IO error occurs
+ *      - LE_NO_MEMORY     If a volume requires more PEBs than the partition size
  */
 //--------------------------------------------------------------------------------------------------
 le_result_t pa_flash_CreateUbiVolume
@@ -1963,7 +1994,8 @@ le_result_t pa_flash_CreateUbiVolume
     pa_flash_Desc_t desc,      ///< [IN] Private flash descriptor
     uint32_t ubiVolId,         ///< [IN] UBI volume ID
     const char* ubiVolNamePtr, ///< [IN] UBI volume name
-    uint32_t ubiVolType        ///< [IN] UBI volume type: dynamic or static
+    uint32_t ubiVolType,       ///< [IN] UBI volume type: dynamic or static
+    uint32_t ubiVolSize        ///< [IN] UBI volume size (for dynamic volumes only)
 )
 {
     pa_flash_MtdDesc_t *descPtr = (pa_flash_MtdDesc_t *)desc;
@@ -1974,7 +2006,7 @@ le_result_t pa_flash_CreateUbiVolume
     pa_flash_Info_t* infoPtr;
     le_result_t res;
     uint32_t vol, peb, leb, volPeb = (uint32_t)-1;
-    uint32_t crc, volType;
+    uint32_t crc, volType, volPebs, usedPebs = 0;
     uint64_t ec;
 
     if ((!descPtr) || (descPtr->magic != desc) || (ubiVolId >= PA_FLASH_UBI_MAX_VOLUMES) ||
@@ -1986,14 +2018,19 @@ le_result_t pa_flash_CreateUbiVolume
     switch (ubiVolType)
     {
         case PA_FLASH_VOLUME_DYNAMIC:
+            volPebs = (ubiVolSize +
+                         (descPtr->mtdInfo.eraseSize - (2 * descPtr->mtdInfo.writeSize)) - 1) /
+                      (descPtr->mtdInfo.eraseSize - (2 * descPtr->mtdInfo.writeSize));
             volType = UBI_VID_DYNAMIC;
             break;
         case PA_FLASH_VOLUME_STATIC:
+            volPebs = 1;
             volType = UBI_VID_STATIC;
             break;
         default:
             return LE_BAD_PARAMETER;
     }
+
     if (descPtr->scanDone)
     {
         return LE_FORMAT_ERROR;
@@ -2020,6 +2057,22 @@ le_result_t pa_flash_CreateUbiVolume
             res = LE_DUPLICATE;
             goto error_unscan;
         }
+        if ((UBI_VID_STATIC == descPtr->vtbl[vol].vol_type) ||
+            (UBI_VID_DYNAMIC == descPtr->vtbl[vol].vol_type))
+        {
+            usedPebs += be32toh(descPtr->vtbl[vol].reserved_pebs);
+        }
+    }
+
+    // The number of PEBs to reserve is 2 * UBI_BEB_LIMIT, 2 PEBs for the VTBL, 1 PEB for
+    // wear-leveling and 1 PEB for the atomic LEB change operation
+    usedPebs += (2 * UBI_BEB_LIMIT + 4);
+    if ((descPtr->mtdInfo.nbBlk - usedPebs) < volPebs)
+    {
+        LE_ERROR("MTD%u: UBI volume %u requires too many PEBs %u, only %u free PEBs",
+                 descPtr->mtdNum, ubiVolId, volPebs, (descPtr->mtdInfo.nbBlk - usedPebs));
+        res = LE_NO_MEMORY;
+        goto error_unscan;
     }
 
     infoPtr = &descPtr->mtdInfo;
@@ -2044,14 +2097,7 @@ le_result_t pa_flash_CreateUbiVolume
     if (INVALID_ERASECOUNTER == be64toh(ecHeaderPtr->ec))
     {
         // This is an erased block
-        // Create a new EC header
-        memset(ecHeaderPtr, 0, sizeof(struct ubi_ec_hdr));
-        ecHeaderPtr->magic = htobe32(UBI_EC_HDR_MAGIC);
-        ecHeaderPtr->version = UBI_VERSION;
-        ecHeaderPtr->vid_hdr_offset = htobe32(infoPtr->writeSize);
-        ecHeaderPtr->data_offset = htobe32(2 * infoPtr->writeSize);
-        ecHeaderPtr->image_seq = htobe32(UBI_IMAGE_SEQ_BASE);
-        UpdateEraseCounter(descPtr, ecHeaderPtr);
+        CreateEcHeader(descPtr, ecHeaderPtr);
         res = pa_flash_SeekAtBlock( desc, volPeb );
         if (LE_OK != res)
         {
@@ -2124,7 +2170,7 @@ le_result_t pa_flash_CreateUbiVolume
         // volume type
         strncpy((char *)vtblPtr[ubiVolId].name, ubiVolNamePtr, UBI_MAX_VOLUMES);
         vtblPtr[ubiVolId].name_len = htobe16(strlen(ubiVolNamePtr));
-        vtblPtr[ubiVolId].reserved_pebs = htobe32(1);
+        vtblPtr[ubiVolId].reserved_pebs = htobe32(volPebs);
         vtblPtr[ubiVolId].alignment = htobe32(1);
         vtblPtr[ubiVolId].vol_type = ubiVolType;
         crc = le_crc_Crc32( (uint8_t *)&vtblPtr[ubiVolId],
