@@ -40,7 +40,7 @@ static void Testpa_fwupdate_InitDownload
 
     pa_fwupdateSimu_SetSystemState(false);
     pa_fwupdateSimu_SetReturnVal(LE_OK);
-    LE_ASSERT(LE_FAULT == pa_fwupdate_InitDownload());
+    LE_ASSERT(LE_OK == pa_fwupdate_InitDownload());
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -95,7 +95,7 @@ static void Testpa_fwupdate_MarkGood
 {
     LE_INFO ("======== Test: pa_fwupdate_MarkGood ========");
 
-    LE_ASSERT(LE_FAULT == pa_fwupdate_MarkGood());
+    LE_ASSERT(LE_OK == pa_fwupdate_MarkGood());
 
     pa_fwupdateSimu_SetReturnVal(LE_FAULT);
     LE_ASSERT(LE_FAULT == pa_fwupdate_MarkGood());

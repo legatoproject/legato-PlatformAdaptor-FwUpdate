@@ -290,6 +290,7 @@ le_result_t pa_flash_Open
 
     // Allocate and fill the MTD descriptor
     mtdDescPtr = (pa_flash_MtdDesc_t*)le_mem_ForceAlloc(FlashMtdDescPool);
+    memset(mtdDescPtr, 0x0, sizeof(pa_flash_MtdDesc_t));
     mtdDescPtr->fd = 1;
     mtdDescPtr->mtdNum = mtdNum;
     mtdDescPtr->scanDone = false;
@@ -297,12 +298,15 @@ le_result_t pa_flash_Open
 
     mtdDescPtr->mtdInfo.ubi = true;
     mtdDescPtr->mtdInfo.nbBlk = 1;
+    mtdDescPtr->mtdInfo.nbLeb = 1;
 
     // Validate the MTD descriptor
     mtdDescPtr->magic = (pa_flash_Desc_t)mtdDescPtr;
     *descPtr = (pa_flash_Desc_t)mtdDescPtr;
 
     mtdDescPtr->mtdInfo.writeSize = 1;
+    mtdDescPtr->mtdInfo.eraseSize = 4;
+    mtdDescPtr->mtdInfo.size = 4;
 
     if( infoPtr )
     {
