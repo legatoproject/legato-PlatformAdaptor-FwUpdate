@@ -959,41 +959,67 @@ le_result_t pa_flash_Write
         return LE_BAD_PARAMETER;
     }
 
-    if( (dataSize > descPtr->mtdInfo.eraseSize) &&
-        (dataSize & (descPtr->mtdInfo.writeSize -1)) )
+    if( dataSize > descPtr->mtdInfo.eraseSize )
     {
         return LE_OUT_OF_RANGE;
     }
 
+    size_t remain = (dataSize & (descPtr->mtdInfo.writeSize - 1));
+    uint8_t padBlock[ descPtr->mtdInfo.writeSize ];
+    int32_t nbWrite = dataSize / descPtr->mtdInfo.writeSize;
+    if( remain )
+    {
+        memcpy( padBlock, dataPtr + (dataSize & (~(descPtr->mtdInfo.writeSize - 1))), remain );
+        memset( padBlock + remain, 0xFF, descPtr->mtdInfo.writeSize - remain );
+        remain = descPtr->mtdInfo.writeSize - remain;
+    }
+
+    tryWrite = false;
     do
     {
-        tryWrite = false;
         res = GetBlock( descPtr, &pOffset, &peb );
         if( LE_OK != res )
         {
             return res;
         }
 
-        rc = write(descPtr->fd, dataPtr, dataSize);
-        if( (-1 == rc) || (rc != dataSize) )
+        do
         {
-            LE_ERROR("MTD %d: write fails (%d) at peb %u offset %lx: %m",
-                     descPtr->mtdNum, rc, peb, pOffset);
-            if( (-1 == rc) && (EIO == errno) &&
-                (!((uint32_t)pOffset & (descPtr->mtdInfo.eraseSize - 1))) )
+            while( nbWrite > 0 )
             {
-                res = pa_flash_EraseBlock( desc, peb );
-                if( LE_OK != res )
+                rc = write(descPtr->fd, dataPtr, descPtr->mtdInfo.writeSize);
+                if( (-1 == rc) || (rc != descPtr->mtdInfo.writeSize) )
                 {
-                    return res;
+                    LE_ERROR("MTD %d: write fails (%d) at peb %u offset %lx: %m",
+                             descPtr->mtdNum, rc, peb, pOffset);
+                    if( (-1 == rc) && (EIO == errno) &&
+                        (!((uint32_t)pOffset & (descPtr->mtdInfo.eraseSize - 1))) )
+                    {
+                        res = pa_flash_EraseBlock( desc, peb );
+                        if( LE_OK != res )
+                        {
+                            return res;
+                        }
+                        tryWrite = (false == tryWrite);
+                    }
+                    else
+                    {
+                        return (EIO == errno) ? LE_IO_ERROR : LE_FAULT;
+                    }
                 }
-                tryWrite = true;
+                else
+                {
+                    dataPtr += descPtr->mtdInfo.writeSize;
+                    nbWrite--;
+                }
             }
-            else
+            if( remain )
             {
-                return (EIO == errno) ? LE_IO_ERROR : LE_FAULT;
+                dataPtr = padBlock;
+                remain = 0;
+                nbWrite = 1;
             }
-        }
+        } while( nbWrite > 0 );
     } while( tryWrite && (peb < descPtr->mtdInfo.nbBlk) );
     return LE_OK;
 }
@@ -1085,8 +1111,7 @@ le_result_t pa_flash_WriteAtBlock
         return LE_OUT_OF_RANGE;
     }
 
-    if( (dataSize > descPtr->mtdInfo.eraseSize) &&
-        (dataSize & (descPtr->mtdInfo.writeSize -1)) )
+    if( dataSize > descPtr->mtdInfo.eraseSize )
     {
         return LE_OUT_OF_RANGE;
     }
