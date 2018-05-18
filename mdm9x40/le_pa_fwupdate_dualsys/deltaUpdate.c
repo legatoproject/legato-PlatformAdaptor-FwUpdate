@@ -61,7 +61,7 @@ static le_result_t CheckUbiData
     pa_flash_Info_t *mtdInfoPtr;
     le_result_t res = LE_FAULT;
 
-    LE_INFO( "MTD %d VolId %zu Size=0x%08x, Crc32=0x%08x",
+    LE_INFO( "MTD %d VolId %"PRIu32" Size=0x%08x, Crc32=0x%08x",
              mtdNum, ubiVolId, sizeToCheck, crc32ToCheck );
 
     res = pa_flash_Open( mtdNum, PA_FLASH_OPENMODE_READONLY, &desc, &mtdInfoPtr );
@@ -332,7 +332,7 @@ le_result_t deltaUpdate_ApplyPatch
         goto error;
     }
 
-    LE_INFO("Image type %zu len %zu offset %zu (%zu)",
+    LE_INFO("Image type %"PRIu32" len %zu offset %zu (%zu)",
             cweHdrPtr->imageType, length, offset, cweHdrPtr->imageSize);
 
     if (CWE_IMAGE_TYPE_SBL1 == cweHdrPtr->imageType)

@@ -732,7 +732,7 @@ static le_result_t WriteData
 
     if (!forceClose)
     {
-        LE_DEBUG ("image type %zu len %zu offset 0x%zx", hdrPtr->imageType, length, offset);
+        LE_DEBUG ("image type %"PRIu32" len %zu offset 0x%zx", hdrPtr->imageType, length, offset);
     }
 
     if (isFlashedPtr)

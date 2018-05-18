@@ -911,7 +911,7 @@ le_result_t partition_WriteDataSBL
 
     mtdNum = partition_GetMtdFromImageType( hdrPtr->imageType, true, &MtdNamePtr, NULL, NULL );
 
-    LE_DEBUG("image type %zu len %zu offset 0x%zx", hdrPtr->imageType, length, offset);
+    LE_DEBUG("image type %"PRIu32" len %zu offset 0x%zx", hdrPtr->imageType, length, offset);
 
     if (-1 == mtdNum)
     {
@@ -930,7 +930,7 @@ le_result_t partition_WriteDataSBL
     // Check that SBL is not greater than the max block for the partition.
     if (sblNbBlk > (flashInfo.nbBlk / 2))
     {
-        LE_ERROR("SBL is too big: %u (nbBlock %u)",
+        LE_ERROR("SBL is too big: %zu (nbBlock %u)",
                  ImageSize, (ImageSize / flashInfo.eraseSize));
         goto error;
     }
@@ -1255,7 +1255,7 @@ le_result_t partition_WriteUpdatePartition
         goto error;
     }
 
-    LE_DEBUG ("image type %zu len %zu offset 0x%zx", hdrPtr->imageType, length, offset);
+    LE_DEBUG ("image type %"PRIu32" len %zu offset 0x%zx", hdrPtr->imageType, length, offset);
 
     if ((NULL == MtdFd) && (0 == ImageSize) )
     {
