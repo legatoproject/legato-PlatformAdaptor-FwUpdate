@@ -930,8 +930,8 @@ le_result_t partition_WriteDataSBL
     // Check that SBL is not greater than the max block for the partition.
     if (sblNbBlk > (flashInfo.nbBlk / 2))
     {
-        LE_ERROR("SBL is too big: %zu (nbBlock %u)",
-                 ImageSize, (ImageSize / flashInfo.eraseSize));
+        LE_ERROR("SBL is too big: %zu (nbBlock %zu)",
+                 ImageSize, (ImageSize / (size_t)flashInfo.eraseSize));
         goto error;
     }
 
