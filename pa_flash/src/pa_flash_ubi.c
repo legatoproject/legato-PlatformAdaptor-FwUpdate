@@ -1213,7 +1213,7 @@ le_result_t pa_flash_ReadUbiAtBlock
 )
 {
     pa_flash_MtdDesc_t* descPtr = (pa_flash_MtdDesc_t *)desc;
-    size_t size = *dataSizePtr;
+    size_t size;
     uint32_t peb, nbLeb, realSize = 0;
     off_t blkOff;
     bool isBad;
@@ -1229,6 +1229,7 @@ le_result_t pa_flash_ReadUbiAtBlock
         return LE_FORMAT_ERROR;
     }
 
+    size = *dataSizePtr;
     nbLeb = be32toh(descPtr->vtblPtr->reserved_pebs);
     if( leb >= nbLeb )
     {

@@ -172,7 +172,7 @@ le_result_t pa_flash_GetInfo
         LE_ERROR( "Unable to read page size for mtd %d: %m\n", mtdNum );
         return LE_UNSUPPORTED;
     }
-    fscanf( mtdFdPtr, "%d", &(infoPtr->size) );
+    fscanf( mtdFdPtr, "%u", &(infoPtr->size) );
     fclose( mtdFdPtr );
 
     // If MTD number is valid, try to read the partition write size
@@ -183,7 +183,7 @@ le_result_t pa_flash_GetInfo
         LE_ERROR( "Unable to read write size for mtd %d: %m\n", mtdNum );
         return LE_UNSUPPORTED;
     }
-    fscanf( mtdFdPtr, "%d", &(infoPtr->writeSize) );
+    fscanf( mtdFdPtr, "%u", &(infoPtr->writeSize) );
     fclose( mtdFdPtr );
 
     // If MTD number is valid, try to read the partition erase size
@@ -194,7 +194,7 @@ le_result_t pa_flash_GetInfo
         LE_ERROR( "Unable to read erase size for mtd %d: %m\n", mtdNum );
         return LE_UNSUPPORTED;
     }
-    fscanf( mtdFdPtr, "%d", &(infoPtr->eraseSize) );
+    fscanf( mtdFdPtr, "%u", &(infoPtr->eraseSize) );
     fclose( mtdFdPtr );
 
     // If MTD number is valid, try to read the partition name
@@ -642,6 +642,10 @@ le_result_t pa_flash_MarkBadBlock
 
     if( descPtr->scanDone )
     {
+        if (blockIndex >= PA_FLASH_MAX_LEB)
+        {
+            return LE_OUT_OF_RANGE;
+        }
         // LEB access, fetch the PEB linked to the LEB
         peb = descPtr->lebToPeb[blockIndex];
         if( -1 == peb )
@@ -702,6 +706,10 @@ le_result_t pa_flash_EraseBlock
     peb = leb;
     if( descPtr->scanDone )
     {
+        if (leb >= PA_FLASH_MAX_LEB)
+        {
+            return LE_OUT_OF_RANGE;
+        }
         // LEB access, fetch the PEB linked to the LEB
         peb = descPtr->lebToPeb[leb];
         if( -1 == peb )
@@ -721,7 +729,8 @@ le_result_t pa_flash_EraseBlock
                  descPtr->mtdNum, peb, eraseMe.start);
         if( (-1 == rc) && (EIO == errno) && descPtr->markBad )
         {
-            res = pa_flash_MarkBadBlock( desc, peb );
+            // Retrieve the LEB if scanDone, else use directly the PEB
+            res = pa_flash_MarkBadBlock( desc, (descPtr->scanDone ? leb : peb) );
             if( LE_OK != res )
             {
                 return res;
@@ -995,7 +1004,26 @@ le_result_t pa_flash_Write
                     if( (-1 == rc) && (EIO == errno) &&
                         (!((uint32_t)pOffset & (descPtr->mtdInfo.eraseSize - 1))) )
                     {
-                        res = pa_flash_EraseBlock( desc, peb );
+                        int iLeb, leb = -1;
+
+                        if( descPtr->scanDone )
+                        {
+                            // Retrieve the LEB from PEB
+                            for( iLeb = 0; iLeb < descPtr->mtdInfo.nbLeb; iLeb++ )
+                            {
+                                if( peb == descPtr->lebToPeb[iLeb] )
+                                {
+                                    leb = iLeb;
+                                    break;
+                                }
+                            }
+                            if( -1 == leb )
+                            {
+                                LE_CRIT("No LEB found for PEB %u", peb);
+                                return LE_IO_ERROR;
+                            }
+                        }
+                        res = pa_flash_EraseBlock( desc, (descPtr->scanDone ? leb : peb) );
                         if( LE_OK != res )
                         {
                             return res;
