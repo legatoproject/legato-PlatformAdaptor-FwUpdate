@@ -1353,7 +1353,8 @@ le_result_t partition_WriteUpdatePartition
 
     if (((uint32_t)(length + InOffset)) >= FlashInfoPtr->eraseSize)
     {
-        memcpy( DataPtr + InOffset, dataPtr, FlashInfoPtr->eraseSize - InOffset );
+        size_t inOffsetSave = FlashInfoPtr->eraseSize - InOffset;
+        memcpy( DataPtr + InOffset, dataPtr, inOffsetSave );
         // set isFlashed before the write because even if the write returns an error
         // some data could have been written in the flash
         if (isFlashedPtr)
@@ -1365,8 +1366,8 @@ le_result_t partition_WriteUpdatePartition
             LE_ERROR( "fwrite to nandwrite fails: %m" );
             goto error;
         }
-        InOffset = length - (FlashInfoPtr->eraseSize - InOffset);
-        memcpy( DataPtr, dataPtr, InOffset );
+        InOffset = length - inOffsetSave;
+        memcpy( DataPtr, dataPtr + inOffsetSave, InOffset );
     }
     else
     {
