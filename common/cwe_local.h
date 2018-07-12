@@ -86,7 +86,8 @@ typedef enum
     CWE_IMAGE_TYPE_CUS1,                          ///<  User image image 0 or 1, for customer1
                                                   ///<  partition
     CWE_IMAGE_TYPE_CUS2,                          ///<  User image image 2, for customer2 partition
-    CWE_IMAGE_TYPE_MAX  = CWE_IMAGE_TYPE_CUS2,    ///<  End of list
+    CWE_IMAGE_TYPE_HASH,                          ///<  Hash
+    CWE_IMAGE_TYPE_MAX  = CWE_IMAGE_TYPE_HASH,    ///<  End of list
     CWE_IMAGE_TYPE_COUNT,                         ///<  Number of entries in list
 }
 cwe_ImageType_t;

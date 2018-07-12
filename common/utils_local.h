@@ -44,4 +44,3 @@ void utils_CopyAndIncrPtr
 );
 
 #endif /* LEGATO_UTILSLOCAL_INCLUDE_GUARD */
-

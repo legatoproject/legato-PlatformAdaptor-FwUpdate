@@ -11,6 +11,7 @@ cflags:
 {
     -I${LEGATO_ROOT}/components/watchdogChain
     -I${LEGATO_ROOT}/platformAdaptor/fwupdate/pa_patch/inc
+    -I${LEGATO_ROOT}/platformAdaptor/fwupdate/common
     -w
     -DLE_MEM_VALGRIND
     -Dsystem=MySystem
@@ -22,9 +23,9 @@ sources:
 {
     ${LEGATO_ROOT}/platformAdaptor/fwupdate/mdm9x40/le_pa_fwupdate_dualsys/pa_fwupdate_dualsys.c
     ${LEGATO_ROOT}/platformAdaptor/fwupdate/mdm9x40/le_pa_fwupdate_dualsys/partition.c
-    ${LEGATO_ROOT}/platformAdaptor/fwupdate/mdm9x40/le_pa_fwupdate_dualsys/cwe.c
+    ${LEGATO_ROOT}/platformAdaptor/fwupdate/common/cwe.c
     ${LEGATO_ROOT}/platformAdaptor/fwupdate/mdm9x40/le_pa_fwupdate_dualsys/deltaUpdate.c
-    ${LEGATO_ROOT}/platformAdaptor/fwupdate/mdm9x40/le_pa_fwupdate_dualsys/utils.c
+    ${LEGATO_ROOT}/platformAdaptor/fwupdate/common/utils.c
     fwupdate_stubs.c
     wdg_stubs.c
 }

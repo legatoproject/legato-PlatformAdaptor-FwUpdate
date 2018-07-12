@@ -22,6 +22,7 @@ if ($ENV{TARGET} MATCHES "localhost")
        .
        -i ${LEGATO_ROOT}/platformAdaptor/fwupdate/pa_flash/inc
        -i ${LEGATO_ROOT}/platformAdaptor/fwupdate/pa_patch/inc
+       -i ${LEGATO_ROOT}/platformAdaptor/fwupdate/common
        -i ${LEGATO_FWUPDATE}
        -i ${LEGATO_FRAMEWORK_SRC}
        -i ${LEGATO_FRAMEWORK_INC}

@@ -61,6 +61,28 @@ static const char ImageString [CWE_IMAGE_TYPE_COUNT][sizeof(uint32_t)] =
     { 'C', 'U', 'S', '0' },     ///<  Customer 0 or 1 image in dual system
     { 'C', 'U', 'S', '1' },     ///<  Customer 0 or 1 image in dual system
     { 'C', 'U', 'S', '2' },     ///<  Customer 2 image
+    { 'H', 'A', 'S', 'H' },     ///<  Hash
+};
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * List of accepted product IDs. Note that some targets have a single product ID while other may
+ * have multiples product IDs.
+ */
+//--------------------------------------------------------------------------------------------------
+static uint32_t ProductIdList[] =
+{
+#ifdef PA_FWUPDATE_PRODUCT_ID
+    PA_FWUPDATE_PRODUCT_ID,
+#endif
+
+#ifdef PA_FWUPDATE_APP_PRODUCT_ID
+    PA_FWUPDATE_APP_PRODUCT_ID,
+#endif
+
+#ifdef PA_FWUPDATE_USR_PRODUCT_ID
+    PA_FWUPDATE_USR_PRODUCT_ID,
+#endif
 };
 
 //==================================================================================================
@@ -86,12 +108,38 @@ static uint32_t GetImageValue
     if (imageType < CWE_IMAGE_TYPE_COUNT)
     {
         imageVal = (ImageString[imageType][0] << 24) |
-            (ImageString[imageType][1] << 16) |
-            (ImageString[imageType][2] <<  8) |
-            ImageString[imageType][3];
-    }
+                   (ImageString[imageType][1] << 16) |
+                   (ImageString[imageType][2] <<  8) |
+                   (ImageString[imageType][3]);
+            }
 
     return imageVal;
+}
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * This function checks if a product ID exists in the allowed list of product IDs
+ *
+ * @return
+ *      - true  if the identifier is valid
+ *      - false otherwise
+ */
+//--------------------------------------------------------------------------------------------------
+static bool IsValidProductId
+(
+    uint32_t identifier   ///< [IN] Product Identifier
+)
+{
+    int i;
+    for (i=0; i< NUM_ARRAY_MEMBERS(ProductIdList); i++)
+    {
+        if (ProductIdList[i] == identifier)
+        {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -286,9 +334,9 @@ le_result_t cwe_LoadHeader
             /* The image type was already checked in LoadCweHeader */
 
             /* Validate product ID */
-            if (hdpPtr->prodType != PA_FWUPDATE_PRODUCT_ID)
+            if (!IsValidProductId(hdpPtr->prodType))
             {
-                LE_ERROR ("Bad Product Id in the header");
+                LE_ERROR ("Bad Product Id in the header %x", hdpPtr->prodType);
                 result = LE_FAULT;
             }
 
@@ -310,7 +358,6 @@ le_result_t cwe_LoadHeader
             }
 
             /* The image CRC will be checked when all data are retrieved */
-
             if (result != LE_OK)
             {
                 LE_ERROR ("Error when validate the header");
@@ -320,4 +367,3 @@ le_result_t cwe_LoadHeader
     LE_DEBUG ("result %d", result);
     return result;
 }
-
