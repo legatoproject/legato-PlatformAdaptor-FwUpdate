@@ -201,11 +201,21 @@ const char *pa_fwupdate_GetUpdateStatusLabel
         "Download in progress",             // PA_FWUPDATE_INTERNAL_STATUS_DWL_ONGOING
         "Download failed",                  // PA_FWUPDATE_INTERNAL_STATUS_DWL_FAILED
         "Download timeout",                 // PA_FWUPDATE_INTERNAL_STATUS_DWL_TIMEOUT
+        "Swap and mark good ongoing",       // PA_FWUPDATE_INTERNAL_STATUS_SWAP_MG_ONGOING
+        "Swap ongoing",                     // PA_FWUPDATE_INTERNAL_STATUS_SWAP_ONGOING
         "Unknown status"                    // PA_FWUPDATE_INTERNAL_STATUS_UNKNOWN
     };
 
+    // Check parameters
+    if (status > PA_FWUPDATE_INTERNAL_STATUS_UNKNOWN)
+    {
+        LE_ERROR("Invalid status parameter (%d)!", (int)status);
+        // Always return a status label.
+        status = PA_FWUPDATE_INTERNAL_STATUS_UNKNOWN;
+    }
+
     // Point to the matching label.
-    return FwUpdateStatusLabel[PA_FWUPDATE_INTERNAL_STATUS_OK];
+    return FwUpdateStatusLabel[status];
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -935,6 +945,25 @@ void le_wdogChain_Kick
 le_result_t pa_fwupdate_NvupDelete
 (
     void
+)
+{
+    return LE_OK;
+}
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Check if the the last swap has been requested by a Legato API
+ *
+ * @return
+ *      - LE_OK            on success
+ *      - LE_UNSUPPORTED   the feature is not supported
+ *      - LE_BAD_PARAMETER bad parameter
+ *      - LE_FAULT         else
+ */
+//--------------------------------------------------------------------------------------------------
+le_result_t pa_fwupdate_IsSwapRequestedByLegato
+(
+    bool* isLegatoSwapReqPtr   ///< [OUT] Set to true if the swap is requested by a Legato API
 )
 {
     return LE_OK;

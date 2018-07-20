@@ -178,9 +178,21 @@ static void Testpa_fwupdate_Install
     void
 )
 {
+    pa_fwupdate_UpdateStatus_t status;
+    char statusLabel[LE_FWUPDATE_STATUS_LABEL_LENGTH_MAX];
+    size_t statusLabelLength = LE_FWUPDATE_STATUS_LABEL_LENGTH_MAX;
+
     LE_INFO ("======== Test: pa_fwupdate_Install ========");
 
     LE_ASSERT(LE_FAULT == pa_fwupdate_Install(true));
+    LE_ASSERT_OK(pa_fwupdate_GetUpdateStatus(&status, statusLabel, statusLabelLength));
+    LE_ASSERT(PA_FWUPDATE_UPDATE_STATUS_UNKNOWN == status);
+    LE_ASSERT(0 == strncmp(statusLabel, "Swap and mark good ongoing", statusLabelLength));
+
+    LE_ASSERT(LE_FAULT == pa_fwupdate_Install(false));
+    LE_ASSERT_OK(pa_fwupdate_GetUpdateStatus(&status, statusLabel, statusLabelLength));
+    LE_ASSERT(PA_FWUPDATE_UPDATE_STATUS_UNKNOWN == status);
+    LE_ASSERT(0 == strncmp(statusLabel, "Swap ongoing", statusLabelLength));
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -196,7 +208,7 @@ static void Testpa_fwupdate_GetUpdateStatus
     void
 )
 {
-    pa_fwupdate_UpdateStatus_t statusPtr;
+    pa_fwupdate_UpdateStatus_t status;
     char statusLabel;
     size_t statusLabelLength = 1;
 
@@ -204,7 +216,7 @@ static void Testpa_fwupdate_GetUpdateStatus
 
     LE_ASSERT(LE_BAD_PARAMETER == pa_fwupdate_GetUpdateStatus(NULL, &statusLabel,
                                                               statusLabelLength));
-    LE_ASSERT_OK(pa_fwupdate_GetUpdateStatus(&statusPtr, &statusLabel, statusLabelLength));
+    LE_ASSERT_OK(pa_fwupdate_GetUpdateStatus(&status, &statusLabel, statusLabelLength));
 }
 
 //--------------------------------------------------------------------------------------------------

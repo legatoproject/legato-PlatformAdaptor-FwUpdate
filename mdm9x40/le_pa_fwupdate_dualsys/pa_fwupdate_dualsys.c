@@ -2659,7 +2659,7 @@ le_result_t pa_fwupdate_Install
     pa_fwupdate_System_t systemArray[PA_FWUPDATE_SUBSYSID_MAX];
     int ssid;
 
-    // check if a resume is ongoing
+    // Check if a resume is ongoing
     result = pa_fwupdate_GetResumePosition(&position);
     if ((LE_OK != result) || position)
     {
@@ -2667,24 +2667,38 @@ le_result_t pa_fwupdate_Install
         return LE_BUSY;
     }
 
-    /* Program the SWAP */
-    result = pa_fwupdate_GetSystem (systemArray);
+    // Note that programming the swap (ssdata) via QMI takes 3~4 seconds to complete. If a reboot
+    // occurs during this phase, the internal status SWAP ONGOING will be catched at startup.
+    if (isMarkGoodReq)
+    {
+        RECORD_DWL_STATUS(PA_FWUPDATE_INTERNAL_STATUS_SWAP_MG_ONGOING);
+    }
+    else
+    {
+        RECORD_DWL_STATUS(PA_FWUPDATE_INTERNAL_STATUS_SWAP_ONGOING);
+    }
+
+    // Program the SWAP
+    result = pa_fwupdate_GetSystem(systemArray);
     if (LE_OK == result)
     {
         for (ssid = PA_FWUPDATE_SUBSYSID_MODEM; ssid < PA_FWUPDATE_SUBSYSID_MAX; ssid++)
         {
             systemArray[ssid] ^= (PA_FWUPDATE_SYSTEM_1 | PA_FWUPDATE_SYSTEM_2);
         }
+
         result = pa_fwupdate_SetActiveSystem(systemArray, isMarkGoodReq);
-    }
-    if (LE_OK == result)
-    {
-        /* request modem to check if there is NVUP files to apply
-         * no need to check the result as SSID are already modified we need to reset */
-        pa_fwupdate_NvupApply();
-        /* make a system reset */
-        pa_fwupdate_Reset();
-        /* at this point the system is resetting */
+        if (LE_OK == result)
+        {
+            // Request modem to check if there is NVUP files to apply
+            // no need to check the result as SSID are already modified we need to reset
+            pa_fwupdate_NvupApply();
+
+            // Make a system reset
+            pa_fwupdate_Reset();
+
+            // At this point the system is resetting
+        }
     }
 
     LE_DEBUG ("Swap result %d", result);
@@ -2796,6 +2810,8 @@ le_result_t pa_fwupdate_GetUpdateStatus
         PA_FWUPDATE_UPDATE_STATUS_DWL_ONGOING,     // PA_FWUPDATE_INTERNAL_STATUS_DWL_ONGOING
         PA_FWUPDATE_UPDATE_STATUS_DWL_FAILED,      // PA_FWUPDATE_INTERNAL_STATUS_DWL_FAILED
         PA_FWUPDATE_UPDATE_STATUS_DWL_TIMEOUT,     // PA_FWUPDATE_INTERNAL_STATUS_DWL_TIMEOUT
+        PA_FWUPDATE_UPDATE_STATUS_UNKNOWN,         // PA_FWUPDATE_INTERNAL_STATUS_SWAP_MG_ONGOING
+        PA_FWUPDATE_UPDATE_STATUS_UNKNOWN,         // PA_FWUPDATE_INTERNAL_STATUS_SWAP_ONGOING
         PA_FWUPDATE_UPDATE_STATUS_UNKNOWN          // PA_FWUPDATE_INTERNAL_STATUS_UNKNOWN
     };
 
@@ -2814,9 +2830,11 @@ le_result_t pa_fwupdate_GetUpdateStatus
 
     if (LE_OK == result)
     {
-        if ((PA_FWUPDATE_INTERNAL_STATUS_DWL_ONGOING == internalStatus) ||
-            (PA_FWUPDATE_INTERNAL_STATUS_DWL_TIMEOUT == internalStatus) ||
-            (PA_FWUPDATE_INTERNAL_STATUS_DWL_FAILED == internalStatus))
+        if ((PA_FWUPDATE_INTERNAL_STATUS_DWL_ONGOING == internalStatus)     ||
+            (PA_FWUPDATE_INTERNAL_STATUS_DWL_TIMEOUT == internalStatus)     ||
+            (PA_FWUPDATE_INTERNAL_STATUS_DWL_FAILED == internalStatus)      ||
+            (PA_FWUPDATE_INTERNAL_STATUS_SWAP_MG_ONGOING == internalStatus) ||
+            (PA_FWUPDATE_INTERNAL_STATUS_SWAP_ONGOING == internalStatus))
         {
             if (NULL != statusLabelPtr)
             {
@@ -2906,7 +2924,9 @@ COMPONENT_INIT
     le_mem_ExpandPool(ChunkPool, 1);
 
     int mtdNum;
+    le_result_t result;
     pa_flash_Info_t flashInfo;
+    pa_fwupdate_InternalStatus_t internalStatus;
 
     // Get MTD information from SBL partition. This is will be used to fix the
     // pool object size and compute the max object size
@@ -2937,11 +2957,33 @@ COMPONENT_INIT
     // Force release in case of crash between request and release
     ReleaseSwUpdate();
 
+    // In case of an ongoing installation, check the swap state.
+    result = ReadDwlStatus(&internalStatus);
+    if ((LE_OK == result) &&
+       ((PA_FWUPDATE_INTERNAL_STATUS_SWAP_ONGOING == internalStatus) ||
+        (PA_FWUPDATE_INTERNAL_STATUS_SWAP_MG_ONGOING == internalStatus)))
+    {
+        bool isLegatoSwapReq = false;
+        result = pa_fwupdate_IsSwapRequestedByLegato(&isLegatoSwapReq);
+        if (LE_OK == result)
+        {
+            if (isLegatoSwapReq)
+            {
+                LE_INFO("Package installed successfuly");
+                RECORD_DWL_STATUS(PA_FWUPDATE_UPDATE_STATUS_OK);
+            }
+            else
+            {
+                LE_ERROR("An unexpected reboot occured during last installation. Redo the install");
+                pa_fwupdate_Install(PA_FWUPDATE_INTERNAL_STATUS_SWAP_MG_ONGOING == internalStatus);
+            }
+        }
+    }
+
     CheckSyncAtStartup();
 
     if (GetResumeCtx(&ResumeCtx) != LE_OK)
     {
-        le_result_t result;
         pa_fwupdate_UpdateStatus_t status = PA_FWUPDATE_UPDATE_STATUS_UNKNOWN;
 
         LE_ERROR("Error when getting the resume context");

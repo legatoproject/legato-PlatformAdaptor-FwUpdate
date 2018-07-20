@@ -44,8 +44,11 @@ typedef enum pa_fwupdate_InternalStatus
     PA_FWUPDATE_INTERNAL_STATUS_DWL_ONGOING,     ///< Downloading in progress
     PA_FWUPDATE_INTERNAL_STATUS_DWL_FAILED,      ///< Last downloading failed
     PA_FWUPDATE_INTERNAL_STATUS_DWL_TIMEOUT,     ///< Last downloading stopped due to timeout
+    PA_FWUPDATE_INTERNAL_STATUS_SWAP_MG_ONGOING, ///< Swap and mark good in progress
+    PA_FWUPDATE_INTERNAL_STATUS_SWAP_ONGOING,    ///< Swap in progress
     PA_FWUPDATE_INTERNAL_STATUS_UNKNOWN          ///< Unknown status. It has to be the last one.
-} pa_fwupdate_InternalStatus_t;
+}
+pa_fwupdate_InternalStatus_t;
 
 //--------------------------------------------------------------------------------------------------
 /**
@@ -105,6 +108,22 @@ LE_SHARED le_result_t pa_fwupdate_SetUnsyncState
 LE_SHARED le_result_t pa_fwupdate_SetSyncState
 (
     void
+);
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Check if the the last swap has been requested by a Legato API
+ *
+ * @return
+ *      - LE_OK            on success
+ *      - LE_UNSUPPORTED   the feature is not supported
+ *      - LE_BAD_PARAMETER bad parameter
+ *      - LE_FAULT         else
+ */
+//--------------------------------------------------------------------------------------------------
+LE_SHARED le_result_t pa_fwupdate_IsSwapRequestedByLegato
+(
+    bool* isLegatoSwapReqPtr   ///< [OUT] Set to true if the swap is requested by a Legato API
 );
 
 //--------------------------------------------------------------------------------------------------
