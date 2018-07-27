@@ -17,3 +17,6 @@ file(MAKE_DIRECTORY ${APP_OUTPUT_PATH})
 
 # fwupdateDualSys unitary test
 add_subdirectory(fwupdateDualsysUnitTest)
+
+# fwupdateSingleSys unitary test
+add_subdirectory(fwupdateSinglesysUnitTest)

@@ -617,7 +617,7 @@ static le_result_t GetNewBlock
         {
             peb = ieb;
             pec = ec;
-            LE_INFO("New block at %u: ec %llu", peb, pec);
+            LE_INFO("New block at %u: ec %"PRIu64, peb, pec);
         }
         else
         {
@@ -625,7 +625,7 @@ static le_result_t GetNewBlock
             {
                 peb = ieb;
                 pec = ec;
-                LE_INFO("Register block at %u: ec %llu", peb, pec);
+                LE_INFO("Register block at %u: ec %"PRIu64, peb, pec);
             }
         }
     }
@@ -644,7 +644,7 @@ static le_result_t GetNewBlock
     }
     infoPtr->ubiPebFreeCount--;
     UpdateVolFreeSize(infoPtr);
-    LE_INFO("Get block at %u: ec %llu", peb, pec);
+    LE_INFO("Get block at %u: ec %"PRIu64, peb, pec);
     return LE_OK;
 }
 
@@ -985,7 +985,7 @@ static le_result_t ReadEcHeader
         return LE_FAULT;
     }
 
-    LE_DEBUG("PEB %lx : MAGIC %c%c%c%c, EC %lld, VID %x DATA %x CRC %x",
+    LE_DEBUG("PEB %lx : MAGIC %c%c%c%c, EC %"PRIu64", VID %x DATA %x CRC %x",
              physEraseBlock,
              ((char *)&(ecHeaderPtr->magic))[0],
              ((char *)&(ecHeaderPtr->magic))[1],
@@ -1572,7 +1572,7 @@ le_result_t pa_flash_ScanUbiAtOffset
     }
 
     UpdateVolFreeSize(infoPtr);
-    LE_DEBUG("mtd %d ubiPebFreeCount %d ubiVolFreeSize %d", descPtr->mtdNum,
+    LE_DEBUG("mtd %d ubiPebFreeCount %d ubiVolFreeSize %zu", descPtr->mtdNum,
              infoPtr->ubiPebFreeCount, infoPtr->ubiVolFreeSize);
 
     if( (!descPtr->vtblPtr) ||
@@ -1750,12 +1750,12 @@ le_result_t pa_flash_ReadUbiAtBlock
                   ? descPtr->ubiVolumeSize -
                        ((descPtr->mtdInfo.eraseSize - descPtr->ubiDataOffset) * (nbLeb - 1))
                   : size;
-    LE_DEBUG("LEB %u (nbLEB %u) size %u realSize %u", leb, nbLeb, size, realSize);
+    LE_DEBUG("LEB %u (nbLEB %u) size %zu realSize %u", leb, nbLeb, size, realSize);
     if (realSize > size)
     {
         realSize = size;
     }
-    LE_DEBUG("LEB %d/%u PEB %d : Read %x at block offset %lx",
+    LE_DEBUG("LEB %d/%u PEB %d : Read %zx at block offset %lx",
              leb, nbLeb, peb, size, blkOff);
     res = FlashSeekAtOffset( desc, (off_t)(blkOff) + (off_t)descPtr->ubiDataOffset );
     if( LE_OK != res )
@@ -2091,7 +2091,7 @@ le_result_t pa_flash_WriteUbiAtBlock
         }
     }
     ecHdrPtr = (struct ubi_ec_hdr *)blockPtr;
-    LE_INFO("LEB %u, PEB %lu OFFSET %lx, EC %llx",
+    LE_INFO("LEB %u, PEB %lu OFFSET %lx, EC %"PRIu64,
             blk, blkOff / infoPtr->eraseSize, blkOff, ecHdrPtr->ec);
     UpdateEraseCounter( descPtr, ecHdrPtr );
     vidHdrPtr = (struct ubi_vid_hdr *)(blockPtr + be32toh(ecHdrPtr->vid_hdr_offset));
@@ -2117,7 +2117,7 @@ le_result_t pa_flash_WriteUbiAtBlock
          goto error;
     }
 
-    LE_DEBUG("Write DATA at %lx: size %x", blkOff + dataOffset, dataSize);
+    LE_DEBUG("Write DATA at %lx: size %zx", blkOff + dataOffset, dataSize);
     LE_DEBUG3(dataPtr);
     res = FlashWrite( desc, dataPtr, dataSize );
     if (LE_OK != res)
@@ -2131,7 +2131,7 @@ le_result_t pa_flash_WriteUbiAtBlock
         goto error;
     }
 
-    LE_DEBUG("Update VID Header at %lx: oldsize %x newsize %x, data_crc %x, hdr_crc %x",
+    LE_DEBUG("Update VID Header at %lx: oldsize %x newsize %zx, data_crc %x, hdr_crc %x",
              blkOff, be32toh(vidHdrPtr->data_size), dataSize,
              be32toh(vidHdrPtr->data_crc), be32toh(vidHdrPtr->hdr_crc));
 
@@ -2217,7 +2217,7 @@ le_result_t pa_flash_AdjustUbiSize
     dataOffset = (2 *infoPtr->writeSize);
     dataSize = infoPtr->eraseSize - dataOffset;
     reservedPebs = (newSize + (dataSize - 1)) / dataSize;
-    LE_DEBUG("Reducing UBI vol %u from %u to %u blocks[last %u] with newSize %u",
+    LE_DEBUG("Reducing UBI vol %u from %u to %u blocks[last %u] with newSize %zu",
              descPtr->ubiVolumeId, be32toh(descPtr->vtblPtr->reserved_pebs),
              reservedPebs, descPtr->ubiLebToPeb[reservedPebs - 1], newSize);
     if( reservedPebs <= be32toh(descPtr->vtblPtr->reserved_pebs) )
@@ -2574,7 +2574,7 @@ le_result_t pa_flash_CreateUbi
         {
             goto error;
         }
-        LE_INFO("PEB %u: Write UBI EC header, MAGIC %c%c%c%c, EC %lld, VID %x DATA %x CRC %x",
+        LE_INFO("PEB %u: Write UBI EC header, MAGIC %c%c%c%c, EC %"PRIu64", VID %x DATA %x CRC %x",
                  peb,
                  ((char *)&(ecHeaderPtr->magic))[0],
                  ((char *)&(ecHeaderPtr->magic))[1],
@@ -2772,7 +2772,7 @@ le_result_t pa_flash_CreateUbiAtOffset
         // Create a new EC header
         CreateEcHeader(descPtr, ecHeaderPtr);
         // Erase the current block
-        LE_INFO("PEB %u: Write UBI EC header, MAGIC %c%c%c%c, EC %lld, VID %x DATA %x CRC %x",
+        LE_INFO("PEB %u: Write UBI EC header, MAGIC %c%c%c%c, EC %"PRIu64", VID %x DATA %x CRC %x",
                  peb,
                  ((char *)&(ecHeaderPtr->magic))[0],
                  ((char *)&(ecHeaderPtr->magic))[1],

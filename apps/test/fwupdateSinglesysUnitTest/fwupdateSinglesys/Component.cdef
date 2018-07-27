@@ -1,0 +1,31 @@
+requires:
+{
+    api:
+    {
+        le_fwupdate.api         [types-only]
+        le_flash.api            [types-only]
+    }
+}
+
+cflags:
+{
+    -I${LEGATO_ROOT}/components/watchdogChain
+    -I${LEGATO_ROOT}/platformAdaptor/fwupdate/pa_patch/inc
+    -I${LEGATO_ROOT}/platformAdaptor/fwupdate/common
+    -I${LEGATO_ROOT}/platformAdaptor/fwupdate/mdm9x07/le_pa_fwupdate_singlesys
+    -DLE_MEM_VALGRIND
+    -Dsystem=MySystem
+    -DWEXITSTATUS=MyWEXITSTATUS
+    -DPA_FWUPDATE_APP_PRODUCT_ID=0x59393231
+    -DPA_FWUPDATE_USR_PRODUCT_ID=0x39583238
+}
+
+sources:
+{
+    ${LEGATO_ROOT}/platformAdaptor/fwupdate/mdm9x07/le_pa_fwupdate_singlesys/partition.c
+    ${LEGATO_ROOT}/platformAdaptor/fwupdate/mdm9x07/le_pa_fwupdate_singlesys/pa_fwupdate_singlesys.c
+    ${LEGATO_ROOT}/platformAdaptor/fwupdate/common/cwe.c
+    ${LEGATO_ROOT}/platformAdaptor/fwupdate/common/utils.c
+    fwupdate_stubs.c
+    wdg_stubs.c
+}

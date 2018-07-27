@@ -592,7 +592,7 @@ le_result_t partition_CheckData
 
     while ((imageSize < sizeToCheck) && (offset < (flashInfoPtr->nbLeb * flashInfoPtr->eraseSize)))
     {
-        loff_t blkOff = (loff_t)offset;
+        off_t blkOff = offset;
         uint32_t iBlk, nBlk;
 
         size = (((imageSize + flashInfoPtr->eraseSize) < sizeToCheck)
@@ -606,11 +606,11 @@ le_result_t partition_CheckData
             LE_ERROR("nanosleep(%ld.%ld) fails: %m", suspendDelay.tv_sec, suspendDelay.tv_nsec);
         }
 
-        LE_DEBUG("Read %d at offset 0x%lx, block offset 0x%llx", size, offset, blkOff);
+        LE_DEBUG("Read %zu at offset 0x%lx, block offset 0x%lx", size, offset, blkOff);
         if (LE_OK != pa_flash_SeekAtBlock( flashFd,
-                                           ((off_t)blkOff / flashInfoPtr->eraseSize) ))
+                                           (blkOff / flashInfoPtr->eraseSize) ))
         {
-            LE_ERROR("Seek fails for offset 0x%llx: %m", blkOff);
+            LE_ERROR("Seek fails for offset 0x%lx: %m", blkOff);
             goto error;
         }
         nBlk = (size + (flashInfoPtr->writeSize - 1)) / flashInfoPtr->writeSize;
@@ -620,7 +620,7 @@ le_result_t partition_CheckData
                                         (checkBlockPtr + (iBlk * flashInfoPtr->writeSize)),
                                         flashInfoPtr->writeSize ))
             {
-                LE_ERROR("Read fails for offset 0x%llx: %m", blkOff);
+                LE_ERROR("Read fails for offset 0x%lx: %m", blkOff);
                 goto error;
             }
         }
@@ -931,7 +931,7 @@ le_result_t partition_ComputeDataCrc32SwifotaPartition
     for( rdsize = 0; rdsize < size; rdsize += crcsize, rdoffset += crcsize )
     {
         crcsize = ((size - rdsize) >= baseSize ? baseSize : size - rdsize);
-        LE_DEBUG("size %zu rdsize %zu crcsize %zu baseSize %zu rdoffset 0x%lx atOffset 0x%lx",
+        LE_DEBUG("size %u rdsize %zu crcsize %zu baseSize %zu rdoffset 0x%lx atOffset 0x%lx",
                  size, rdsize, crcsize, baseSize, rdoffset, atOffset);
         if( rdoffset < atOffset )
         {
@@ -1101,7 +1101,7 @@ le_result_t partition_WriteSwifotaPartition
                                                offset +
                                                (IMG_BLOCK_OFFSET * FlashInfoPtr->eraseSize)))
             {
-                LE_ERROR("Failed to seek block at offset: %d", offset);
+                LE_ERROR("Failed to seek block at offset: %zu", offset);
                 goto error;
             }
 

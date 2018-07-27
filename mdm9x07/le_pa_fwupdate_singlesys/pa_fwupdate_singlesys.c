@@ -292,8 +292,8 @@ static le_result_t UpdateResumeCtx
             LE_DEBUG("resumeCtx: ctxCounter %d, imageType %d, imageSize %d, imageCrc 0x%x,",
                      resumeCtxPtr->saveCtx.ctxCounter, resumeCtxPtr->saveCtx.imageType,
                      resumeCtxPtr->saveCtx.imageSize, resumeCtxPtr->saveCtx.imageCrc);
-            LE_DEBUG("            currentImageCrc 0x%x totalRead %d currentOffset 0x%x,",
-                     resumeCtxPtr->saveCtx.currentImageCrc,resumeCtxPtr->saveCtx.totalRead,
+            LE_DEBUG("            currentImageCrc 0x%x totalRead %zu currentOffset 0x%x,",
+                     resumeCtxPtr->saveCtx.currentImageCrc, resumeCtxPtr->saveCtx.totalRead,
                      resumeCtxPtr->saveCtx.currentOffset);
             LE_DEBUG("            fullImageLength %zd isFirstNvupDownloaded %d "
                      "isModemDownloaded %d " "ctxCrc 0x%08" PRIx32,
@@ -726,7 +726,7 @@ static size_t WriteCweHeader
     // Check incoming parameters
     if (length > CWE_HEADER_SIZE)
     {
-        LE_ERROR("Length: %d higher than allowed: %d", length, CWE_HEADER_SIZE);
+        LE_ERROR("Length: %zu higher than allowed: %d", length, (int)CWE_HEADER_SIZE);
         return 0;
     }
 
@@ -849,7 +849,7 @@ static size_t WriteImageData
         {
             // Erase the path flag in options to allow new cwe header to be read
             cweHeaderPtr->miscOpts &= (uint8_t)~((uint8_t)CWE_MISC_OPTS_DELTAPATCH);
-            LE_DEBUG ("CurrentImageOffset %d, CurrentImage %d",
+            LE_DEBUG ("CurrentImageOffset %zu, CurrentImage %d",
                       CurrentImageOffset, cweHeaderPtr->imageType);
         }
         resumeCtxPtr->saveCtx.isImageToBeRead = false;
@@ -1195,7 +1195,7 @@ static le_result_t EpollinRead
                         else if (evts & EPOLLIN)
                         {
                             *lengthPtr = read (fd, bufferPtr, *lengthPtr);
-                            LE_DEBUG("Read %d bytes", *lengthPtr);
+                            LE_DEBUG("Read %zd bytes", *lengthPtr);
                             if (0 == *lengthPtr)
                             {
                                 return LE_CLOSED;

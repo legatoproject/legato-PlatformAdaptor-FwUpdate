@@ -100,8 +100,8 @@ static le_result_t GetBlock
             rc = ioctl(descPtr->fd, MEMGETBADBLOCK, &blkOff);
             if( -1 == rc )
             {
-                LE_ERROR("MTD %d: MEMGETBADBLOCK fails for peb %u offset %llx: %m",
-                         descPtr->mtdNum, peb, blkOff);
+                LE_ERROR("MTD %d: MEMGETBADBLOCK fails for peb %u offset %"PRIx64": %m",
+                         descPtr->mtdNum, peb, (uint64_t)blkOff);
                 return (EIO == errno) ? LE_IO_ERROR : LE_FAULT;
             }
             if( rc )
@@ -482,8 +482,8 @@ le_result_t pa_flash_Scan
         rc = ioctl(descPtr->fd, MEMGETBADBLOCK, &blkOff);
         if( -1 == rc )
         {
-            LE_ERROR("MTD %d: MEMGETBADBLOCK fails for block %u, offset %llx: %m",
-                     descPtr->mtdNum, peb, blkOff);
+            LE_ERROR("MTD %d: MEMGETBADBLOCK fails for block %u, offset %"PRIx64": %m",
+                     descPtr->mtdNum, peb, (uint64_t)blkOff);
             memset( descPtr->lebToPeb, PA_FLASH_ERASED_VALUE, sizeof(descPtr->lebToPeb) );
             return (EIO == errno) ? LE_IO_ERROR : LE_FAULT;
         }
@@ -597,8 +597,8 @@ le_result_t pa_flash_CheckBadBlock
     rc = ioctl(descPtr->fd, MEMGETBADBLOCK, &blkOff);
     if( -1 == rc )
     {
-        LE_ERROR("MTD %d: MEMGETBADBLOCK fails for block %u (peb %u), offset %llx: %m",
-                 descPtr->mtdNum, blockIndex, peb, blkOff);
+        LE_ERROR("MTD %d: MEMGETBADBLOCK fails for block %u (peb %u), offset %"PRIx64": %m",
+                 descPtr->mtdNum, blockIndex, peb, (uint64_t)blkOff);
         return (EIO == errno) ? LE_IO_ERROR : LE_FAULT;
     }
     // Update the isBadBlock parameter: 0 = false : good block, 1 = true : bad block
@@ -659,8 +659,8 @@ le_result_t pa_flash_MarkBadBlock
     blkOff = (peb * descPtr->mtdInfo.eraseSize) + descPtr->mtdInfo.startOffset;
     if( -1 == ioctl(descPtr->fd, MEMSETBADBLOCK, &blkOff) )
     {
-        LE_ERROR("MTD %d: MEMSETBADBLOCK fails for block %u (peb %u), offset %llx: %m",
-                 descPtr->mtdNum, blockIndex, peb, blkOff);
+        LE_ERROR("MTD %d: MEMSETBADBLOCK fails for block %u (peb %u), offset %"PRIx64": %m",
+                 descPtr->mtdNum, blockIndex, peb, (uint64_t)blkOff);
         return (EIO == errno) ? LE_IO_ERROR : LE_FAULT;
     }
     LE_INFO("MTD %d: Marked bad block %u (peb %u)\n", descPtr->mtdNum, blockIndex, peb);
