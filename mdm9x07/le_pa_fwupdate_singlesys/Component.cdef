@@ -13,15 +13,14 @@ sources:
     ../../common/utils.c
     ../../common/cwe.c
     ../../pa_flash/src/pa_flash_mtd.c
-    ../../pa_flash/src/pa_flash_ubi.c
+    ../../mdm9x07/le_pa_fwupdate_singlesys/pa_flash_ubi.c
 }
 
 cflags:
 {
     -DPA_FWUPDATE_APP_PRODUCT_ID=0x59393231
     -DPA_FWUPDATE_USR_PRODUCT_ID=0x39583238
-    -I${LEGATO_FWUPDATE_PA_SINGLESYS}/../../pa_patch/inc
-    -I${LEGATO_FWUPDATE_PA_SINGLESYS}/../../mdm9x40/le_pa_fwupdate_dualsys/
+    -I${LEGATO_FWUPDATE_PA_SINGLESYS}/
     -I${LEGATO_FWUPDATE_PA_SINGLESYS}/../../common/
     -I${LEGATO_ROOT}/3rdParty/include
     -I${LEGATO_ROOT}/components/fwupdate/platformAdaptor/inc
