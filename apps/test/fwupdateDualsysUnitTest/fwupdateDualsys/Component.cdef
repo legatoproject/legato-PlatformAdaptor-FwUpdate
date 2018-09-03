@@ -10,17 +10,23 @@ requires:
 cflags:
 {
     -I${LEGATO_ROOT}/components/watchdogChain
+    -I${LEGATO_ROOT}/platformAdaptor/fwupdate/pa_flash/inc
     -I${LEGATO_ROOT}/platformAdaptor/fwupdate/pa_patch/inc
     -I${LEGATO_ROOT}/platformAdaptor/fwupdate/common
-    -w
     -DLE_MEM_VALGRIND
-    -Dsystem=MySystem
-    -DWEXITSTATUS=MyWEXITSTATUS
     -DPA_FWUPDATE_PRODUCT_ID=0x39583430
+    -Dfopen=sys_flashFOpen
+    -Dopen=sys_flashOpen
+    -Dioctl=sys_flashIoctl
+    -Dwrite=sys_flashWrite
+    -Dopendir=sys_flashOpendir
+    -Dsystem=sys_flashSystem
 }
 
 sources:
 {
+    ${LEGATO_ROOT}/platformAdaptor/fwupdate/pa_flash/src/pa_flash_mtd.c
+    ${LEGATO_ROOT}/platformAdaptor/fwupdate/pa_flash/src/pa_flash_ubi.c
     ${LEGATO_ROOT}/platformAdaptor/fwupdate/mdm9x40/le_pa_fwupdate_dualsys/pa_fwupdate_dualsys.c
     ${LEGATO_ROOT}/platformAdaptor/fwupdate/mdm9x40/le_pa_fwupdate_dualsys/partition.c
     ${LEGATO_ROOT}/platformAdaptor/fwupdate/common/cwe.c

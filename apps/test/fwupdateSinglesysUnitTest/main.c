@@ -10,8 +10,9 @@
 #include "interfaces.h"
 #include "pa_fwupdate.h"
 #include "log.h"
+#include "sys_flash.h"
 
-#define FILE_PATH "/tmp/dwl_status.nfo"
+#define FILE_PATH "/fwupdate/dwl_status.nfo"
 #define TEST_FILE "/tmp/test_file.txt"
 
 

@@ -28,33 +28,21 @@
  * "/sys/class/ubi" access path
  */
 //--------------------------------------------------------------------------------------------------
-#ifdef LEGATO_EMBEDDED
 #define SYS_CLASS_UBI_PATH     "/sys/class/ubi"
-#else
-#define SYS_CLASS_UBI_PATH     "/tmp"
-#endif
 
 //--------------------------------------------------------------------------------------------------
 /**
  * "/sys/class/mtd" access path
  */
 //--------------------------------------------------------------------------------------------------
-#ifdef LEGATO_EMBEDDED
 #define SYS_CLASS_MTD_PATH     "/sys/class/mtd"
-#else
-#define SYS_CLASS_MTD_PATH     "/tmp"
-#endif
 
 //--------------------------------------------------------------------------------------------------
 /**
  * "/sys/class/mtd" access path
  */
 //--------------------------------------------------------------------------------------------------
-#ifdef LEGATO_EMBEDDED
 #define PROC_MTD_PATH          "/proc/mtd"
-#else
-#define PROC_MTD_PATH          "/tmp/mtd"
-#endif
 
 //--------------------------------------------------------------------------------------------------
 /**
@@ -793,7 +781,7 @@ le_result_t partition_CheckData
 
     while ((imageSize < sizeToCheck) && (offset < (flashInfoPtr->nbLeb * flashInfoPtr->eraseSize)))
     {
-        loff_t blkOff = (loff_t)offset;
+        off_t blkOff = offset;
         uint32_t iBlk, nBlk;
 
         size = (((imageSize + flashInfoPtr->eraseSize) < sizeToCheck)
@@ -807,11 +795,11 @@ le_result_t partition_CheckData
             LE_ERROR("nanosleep(%ld.%ld) fails: %m", suspendDelay.tv_sec, suspendDelay.tv_nsec);
         }
 
-        LE_DEBUG("Read %d at offset 0x%lx, block offset 0x%llx", size, offset, blkOff);
+        LE_DEBUG("Read %zu at offset 0x%lx, block offset 0x%lx", size, offset, blkOff);
         if (LE_OK != pa_flash_SeekAtBlock( flashFd,
-                                           ((off_t)blkOff / flashInfoPtr->eraseSize) ))
+                                           (blkOff / flashInfoPtr->eraseSize) ))
         {
-            LE_ERROR("seek fails for offset 0x%llx: %m", blkOff);
+            LE_ERROR("seek fails for offset 0x%lx: %m", blkOff);
             goto error;
         }
         nBlk = (size + (flashInfoPtr->writeSize - 1)) / flashInfoPtr->writeSize;
@@ -821,7 +809,7 @@ le_result_t partition_CheckData
                                         (checkBlockPtr + (iBlk * flashInfoPtr->writeSize)),
                                         flashInfoPtr->writeSize ))
             {
-                LE_ERROR("read fails for offset 0x%llx: %m", blkOff);
+                LE_ERROR("read fails for offset 0x%lx: %m", blkOff);
                 goto error;
             }
         }
@@ -949,7 +937,7 @@ le_result_t partition_WriteDataSBL
     // Check that the chunk is inside the SBL temporary image
     if ((offset + length) > ImageSize)
     {
-        LE_ERROR("SBL image size and offset/length mismatch: %u < %zu+%zu",
+        LE_ERROR("SBL image size and offset/length mismatch: %zu < %zu+%zu",
                  ImageSize, offset, length);
         goto error;
     }
@@ -1032,7 +1020,7 @@ le_result_t partition_WriteDataSBL
             // Update SBL base according to this.
             sblBlk = 0;
         }
-        LE_INFO("Flashing SBL scrub: Size %d, base %d, nbblk %d",
+        LE_INFO("Flashing SBL scrub: Size %zu, base %d, nbblk %d",
                 ImageSize, sblBlk, sblNbBlk );
 
         // Keep at least one block for spare
@@ -1062,8 +1050,8 @@ le_result_t partition_WriteDataSBL
 
                 if (LE_OK != pa_flash_CheckBadBlock( flashFd, atBlk, &isBad ))
                 {
-                    LE_ERROR("pa_flash_CheckBadBlock fails for block %d, offset %lld: %m",
-                             atBlk, blkOff);
+                    LE_ERROR("pa_flash_CheckBadBlock fails for block %d, offset %"PRIu64": %m",
+                             atBlk, (uint64_t)blkOff);
                     goto error;
                 }
                 if (isBad)
@@ -1080,8 +1068,8 @@ le_result_t partition_WriteDataSBL
                 // Erase this block
                 if (LE_OK != pa_flash_EraseBlock( flashFd, atBlk ))
                 {
-                    LE_ERROR("pa_flash_EraseBlock fails for block %d, offset %lld: %m",
-                             atBlk, blkOff);
+                    LE_ERROR("pa_flash_EraseBlock fails for block %d, offset %"PRIu64": %m",
+                             atBlk, (uint64_t)blkOff);
                     goto error;
                 }
             }
@@ -1522,7 +1510,7 @@ le_result_t partition_SetBadImage
         res = pa_fwupdate_SetBadImage(badImageMask, isBad);
         if (LE_OK != res)
         {
-            LE_ERROR("Unable to %s bad image 0x%llx", isBad ? "set":"clear", badImageMask);
+            LE_ERROR("Unable to %s bad image 0x%"PRIx64, isBad ? "set":"clear", badImageMask);
             return LE_FAULT;
         }
     }

@@ -17,10 +17,11 @@ if ($ENV{TARGET} MATCHES "localhost")
     endif()
 
     mkexe(${TEST_EXEC}
-       fwupdateSinglesysInitComponent
+       ${LEGATO_ROOT}/platformAdaptor/fwupdate/apps/test/sys_flash
        fwupdateSinglesys
+       fwupdateSinglesysInitComponent
        .
-       -i ${LEGATO_ROOT}/platformAdaptor/fwupdate/pa_flash/inc
+       -i ${LEGATO_ROOT}/platformAdaptor/fwupdate/apps/test/sys_flash
        -i ${LEGATO_ROOT}/platformAdaptor/fwupdate/pa_patch/inc
        -i ${LEGATO_ROOT}/platformAdaptor/fwupdate/common
        -i ${LEGATO_FWUPDATE}

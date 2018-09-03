@@ -82,7 +82,7 @@ static le_result_t CheckUbiData
     for (blk = 0; imageSize < sizeToCheck; blk++)
     {
         size = (sizeToCheck - imageSize);
-        LE_DEBUG("LEB %d : Read 0x%x", blk, size);
+        LE_DEBUG("LEB %d : Read 0x%zx", blk, size);
         res = pa_flash_ReadUbiAtBlock( desc, blk, checkBlockPtr, &size);
         if (LE_OK != res )
         {
@@ -341,7 +341,7 @@ le_result_t deltaUpdate_ApplyPatch
         return LE_NOT_PERMITTED;
     }
 
-    LE_DEBUG( "InPatch %d, len %d, offset %d\n", InPatch, length, offset );
+    LE_DEBUG( "InPatch %d, len %zu, offset %zu\n", InPatch, length, offset );
     if (!InPatch)
     {
         MtdOrigNum = partition_GetMtdFromImageType( cweHdrPtr->imageType, false,
@@ -447,8 +447,8 @@ le_result_t deltaUpdate_ApplyPatch
     size_t patchRemLen = *patchRemLenPtr;
     wrLen = (length > patchRemLen) ? patchRemLen : length;
 
-    LE_DEBUG("Patch %u: Writing to patch file %d: wrLen = %d, "
-             "Patch.size %u, PatchRemLen %d\n",
+    LE_DEBUG("Patch %u: Writing to patch file %d: wrLen = %zu, "
+             "Patch.size %u, PatchRemLen %zu\n",
              patchHdrPtr->number, PatchFd, wrLen,
              patchHdrPtr->size, patchRemLen);
     if (wrLen != write( PatchFd, dataPtr, wrLen ))

@@ -10,8 +10,9 @@
 #include "interfaces.h"
 #include "pa_fwupdate.h"
 #include "log.h"
+#include "sys_flash.h"
 
-#define FILE_PATH "/tmp/dwl_status.nfo"
+#define FILE_PATH "/fwupdate/dwl_status.nfo"
 #define TEST_FILE "/tmp/test_file.txt"
 
 
@@ -100,9 +101,9 @@ static void Testpa_fwupdate_MarkGood
     pa_fwupdateSimu_SetReturnVal(LE_FAULT);
     LE_ASSERT(LE_FAULT == pa_fwupdate_MarkGood());
 
-    pa_flashSimu_SetEccStatsFailed(true);
+    sys_flash_SetEccState(true);
     LE_ASSERT(LE_IO_ERROR == pa_fwupdate_MarkGood());
-    pa_flashSimu_SetEccStatsFailed(false);
+    sys_flash_SetEccState(false);
 }
 
 //--------------------------------------------------------------------------------------------------

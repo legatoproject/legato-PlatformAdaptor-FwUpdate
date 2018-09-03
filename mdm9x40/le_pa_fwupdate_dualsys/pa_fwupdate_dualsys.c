@@ -38,11 +38,7 @@
  * File hosting the last download status
  */
 //--------------------------------------------------------------------------------------------------
-#ifdef LEGATO_EMBEDDED
 #define EFS_DWL_STATUS_FILE "/fwupdate/dwl_status.nfo"
-#else
-#define EFS_DWL_STATUS_FILE "/tmp/dwl_status.nfo"
-#endif
 
 //--------------------------------------------------------------------------------------------------
 /**
@@ -65,15 +61,12 @@
 //--------------------------------------------------------------------------------------------------
 #define MAX_EVENTS 10
 
+//--------------------------------------------------------------------------------------------------
 /**
  * Define the resume context filename
  */
 //--------------------------------------------------------------------------------------------------
-#ifdef LEGATO_EMBEDDED
 #define RESUME_CTX_FILENAME "/fwupdate/fwupdate_ResumeCtx_"
-#else
-#define RESUME_CTX_FILENAME "/tmp/data/le_fs/fwupdate_ResumeCtx_"
-#endif
 
 //--------------------------------------------------------------------------------------------------
 /**
@@ -331,7 +324,7 @@ static le_result_t UpdateResumeCtx
             LE_DEBUG("resumeCtx: ctxCounter %d, imageType %d, imageSize %d, imageCrc 0x%x,",
                      resumeCtxPtr->saveCtx.ctxCounter, resumeCtxPtr->saveCtx.imageType,
                      resumeCtxPtr->saveCtx.imageSize, resumeCtxPtr->saveCtx.imageCrc);
-            LE_DEBUG("            currentImageCrc 0x%x totalRead %d currentOffset 0x%x,",
+            LE_DEBUG("            currentImageCrc 0x%x totalRead %zu currentOffset 0x%x,",
                      resumeCtxPtr->saveCtx.currentImageCrc,resumeCtxPtr->saveCtx.totalRead,
                      resumeCtxPtr->saveCtx.currentOffset);
             LE_DEBUG("            fullImageLength %zd isFirstNvupDownloaded %d "
@@ -402,9 +395,9 @@ static le_result_t EraseResumeCtx
         LE_DEBUG("filename %s", str);
 
         result = le_fs_Delete(str);
-        if ((result != LE_NOT_FOUND) &&(result != LE_OK))
+        if ((result != LE_NOT_FOUND) && (result != LE_OK))
         {
-            LE_ERROR("Error when deleting %s", str);
+            LE_ERROR("Error when deleting %s: %d", str, result);
             result = LE_FAULT;
         }
         else
@@ -676,7 +669,7 @@ static le_result_t WriteNvup
     }
 
     LE_INFO("Writing NVUP file ...");
-    LE_DEBUG("length=%d offset=%d", length, offset);
+    LE_DEBUG("length=%zu offset=%zu", length, offset);
 
     if ((0 == ImageSize) && (0 == offset))
     {
@@ -690,7 +683,7 @@ static le_result_t WriteNvup
 
         // initialize data phase
         ImageSize = hdrPtr->imageSize;
-        LE_DEBUG("ImageSize=%d", ImageSize);
+        LE_DEBUG("ImageSize=%zu", ImageSize);
     }
 
     isEnd = (length+ offset >= ImageSize) ? true : false;
@@ -883,7 +876,7 @@ static size_t WriteImageData
         return 0;
     }
 
-    LE_DEBUG ("imagetype %d, CurrentImageOffset 0x%x length %d, CurrentImageSize %d",
+    LE_DEBUG ("imagetype %d, CurrentImageOffset 0x%zx length %zu, CurrentImageSize %d",
               cweHeaderPtr->imageType,
               CurrentImageOffset,
               length,
@@ -910,7 +903,7 @@ static size_t WriteImageData
         // keep correct calculation of ResumeCtx (saveCtxPtr->totalRead).
         if ((saveCtxPtr->currentOffset == CurrentImageOffset) && LenToFlash)
         {
-            LE_DEBUG ("Clear LenToFlash %d in a new download cycle", LenToFlash);
+            LE_DEBUG ("Clear LenToFlash %zu in a new download cycle", LenToFlash);
             LenToFlash = 0;
         }
 
@@ -929,7 +922,7 @@ static size_t WriteImageData
             LenToFlash += length;
             result = length;
 
-            LE_DEBUG ("CurrentImageOffset %d", CurrentImageOffset);
+            LE_DEBUG ("CurrentImageOffset %zu", CurrentImageOffset);
             if (isFlashed)
             {// some data have been flashed => update the resume context
                 le_result_t ret;
@@ -994,7 +987,7 @@ static size_t WriteImageData
 
                 // erase the path flag in options to allow new cwe header to be read
                 cweHeaderPtr->miscOpts &= (uint8_t)~((uint8_t)CWE_MISC_OPTS_DELTAPATCH);
-                LE_DEBUG ("CurrentImageOffset %d, CurrentImage %d",
+                LE_DEBUG ("CurrentImageOffset %zu, CurrentImage %d",
                           CurrentImageOffset, cweHeaderPtr->imageType);
             }
             resumeCtxPtr->saveCtx.isImageToBeRead = false;
@@ -1431,7 +1424,7 @@ static le_result_t EpollinRead
                         else if (evts & EPOLLIN)
                         {
                             *lengthPtr = read (fd, bufferPtr, *lengthPtr);
-                            LE_DEBUG("read %d bytes", *lengthPtr);
+                            LE_DEBUG("read %zd bytes", *lengthPtr);
                             if (0 == *lengthPtr)
                             {
                                 return LE_CLOSED;
@@ -2970,7 +2963,7 @@ COMPONENT_INIT
             if (isLegatoSwapReq)
             {
                 LE_INFO("Package installed successfuly");
-                RECORD_DWL_STATUS(PA_FWUPDATE_UPDATE_STATUS_OK);
+                RECORD_DWL_STATUS(PA_FWUPDATE_INTERNAL_STATUS_OK);
             }
             else
             {

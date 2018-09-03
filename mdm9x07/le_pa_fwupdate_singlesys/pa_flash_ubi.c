@@ -2230,7 +2230,7 @@ le_result_t pa_flash_AdjustUbiSize
         }
         blockPtr = le_mem_ForceAlloc(UbiBlockPool);
 
-        if( (reservedPebs == be32toh(descPtr->vtblPtr->reserved_pebs)) )
+        if( reservedPebs == be32toh(descPtr->vtblPtr->reserved_pebs) )
         {
             res = LE_OK;
             if (lastSize)

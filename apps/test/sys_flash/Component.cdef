@@ -1,0 +1,4 @@
+sources:
+{
+    sys_flash.c
+}

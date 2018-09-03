@@ -20,3 +20,6 @@ add_subdirectory(fwupdateDualsysUnitTest)
 
 # fwupdateSingleSys unitary test
 add_subdirectory(fwupdateSinglesysUnitTest)
+
+# pa_flash unitary test
+add_subdirectory(pa_flashUnitTest)

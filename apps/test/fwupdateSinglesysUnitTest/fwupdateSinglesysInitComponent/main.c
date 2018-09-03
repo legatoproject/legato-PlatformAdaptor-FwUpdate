@@ -7,17 +7,16 @@
  */
 
 #include "legato.h"
+#include "pa_flash.h"
 
 //--------------------------------------------------------------------------------------------------
 /**
  * Macro definations for fwupdate file name.
  */
 //--------------------------------------------------------------------------------------------------
-#define SYS_CLASS_UBI_PATH     "/tmp"
-#define MTD_PATH               "/tmp/mtd"
-#define RESUME_CTX_FILENAME0   "/tmp/data/le_fs/fwupdate_ResumeCtx_0"
-#define RESUME_CTX_FILENAME1   "/tmp/data/le_fs/fwupdate_ResumeCtx_1"
-
+#define SYS_CLASS_UBI_PATH     "/tmp/sys_flash/sys/class/ubi/"
+#define RESUME_CTX_FILENAME0   "/fwupdate/fwupdate_ResumeCtx_0"
+#define RESUME_CTX_FILENAME1   "/fwupdate/fwupdate_ResumeCtx_1"
 
 //--------------------------------------------------------------------------------------------------
 /**
@@ -97,106 +96,23 @@ static ResumeCtxSave_t ResumeCtxsave;
 //--------------------------------------------------------------------------------------------------
 COMPONENT_INIT
 {
-    FILE* flashFdPtr;
-    int iUbi;
-    char ubiPath[PATH_MAX];
-    char mtdPath[PATH_MAX];
-    int data[2] = {0,1};
-    char mtdFetchName[2][16] = {"system2","modem"};
     le_fs_FileRef_t fd[2];
     le_result_t resultFs;
     size_t writeSize;
 
     LE_TEST_INIT;
 
-    LE_TEST(-1 != system("mkdir -p /tmp/ubi0"));
-    LE_TEST(-1 != system("mkdir -p /tmp/ubi1"));
-    LE_TEST(-1 != system("mkdir -p /tmp/mtd0"));
-    LE_TEST(-1 != system("mkdir -p /tmp/mtd1"));
-
-    if ((-1 == unlink("/tmp/ubi0/mtd_num")) && (ENOENT != errno))
+    resultFs = le_fs_Delete(RESUME_CTX_FILENAME0);
+    if ((LE_OK != resultFs) && (LE_NOT_FOUND != resultFs))
     {
         LE_TEST_FATAL("unlink failed: %m");
     }
 
-    if ((-1 == unlink("/tmp/ubi1/mtd_num")) && (ENOENT != errno))
+    resultFs = le_fs_Delete(RESUME_CTX_FILENAME1);
+    if ((LE_OK != resultFs) && (LE_NOT_FOUND != resultFs))
     {
         LE_TEST_FATAL("unlink failed: %m");
     }
-
-    if ((-1 == unlink("/tmp/mtd0/name")) && (ENOENT != errno))
-    {
-        LE_TEST_FATAL("unlink failed: %m");
-    }
-
-    if ((-1 == unlink("/tmp/mtd1/name")) && (ENOENT != errno))
-    {
-        LE_TEST_FATAL("unlink failed: %m");
-    }
-
-    if ((-1 == unlink("/tmp/mtd")) && (ENOENT != errno))
-    {
-        LE_TEST_FATAL("unlink failed: %m");
-    }
-
-    if ((-1 == unlink(RESUME_CTX_FILENAME0)) && (ENOENT != errno))
-    {
-        LE_TEST_FATAL("unlink failed: %m");
-    }
-
-    if ((-1 == unlink(RESUME_CTX_FILENAME1)) && (ENOENT != errno))
-    {
-        LE_TEST_FATAL("unlink failed: %m");
-    }
-
-    for (iUbi = 0; iUbi <= 1; iUbi++)
-    {
-        snprintf(ubiPath, sizeof(ubiPath), SYS_CLASS_UBI_PATH "/ubi%d/mtd_num", iUbi);
-
-        // Try to open the MTD belonging to ubi0
-        LE_TEST(NULL != (flashFdPtr = fopen(ubiPath, "w")));
-
-        fprintf(flashFdPtr, "%d", data[iUbi]);
-        fseek(flashFdPtr, 0L, SEEK_SET);
-
-        LE_TEST(0 == fclose(flashFdPtr));
-
-        snprintf(mtdPath, sizeof(mtdPath), SYS_CLASS_UBI_PATH "/mtd%d/name", iUbi);
-        LE_TEST((NULL != (flashFdPtr = fopen(mtdPath, "w"))));
-        fprintf(flashFdPtr, "%s", mtdFetchName[iUbi]);
-        fseek(flashFdPtr, 0L, SEEK_SET);
-
-        LE_TEST(0 == fclose(flashFdPtr));
-    }
-
-    LE_INFO("Ubi files are created successfully");
-
-    LE_TEST((NULL != (flashFdPtr = fopen(MTD_PATH, "w+"))));
-    LE_TEST(0 < fprintf(flashFdPtr, "dev:    size   erasesize  name\n"));
-    LE_TEST(0 < fprintf(flashFdPtr, "mtd0: 00280000 00040000 \"sbl\"\n"));
-    LE_TEST(0 < fprintf(flashFdPtr, "mtd1: 00280000 00040000 \"mibib\"\n"));
-    LE_TEST(0 < fprintf(flashFdPtr, "mtd2: 00680000 00040000 \"backup\"\n"));
-    LE_TEST(0 < fprintf(flashFdPtr, "mtd3: 00100000 00040000 \"security\"\n"));
-    LE_TEST(0 < fprintf(flashFdPtr, "mtd4: 00200000 00040000 \"persist\"\n"));
-    LE_TEST(0 < fprintf(flashFdPtr, "mtd5: 01180000 00040000 \"efs2\"\n"));
-    LE_TEST(0 < fprintf(flashFdPtr, "mtd6: 04f40000 00040000 \"swifota\"\n"));
-    LE_TEST(0 < fprintf(flashFdPtr, "mtd7: 00180000 00040000 \"tz\"\n"));
-    LE_TEST(0 < fprintf(flashFdPtr, "mtd8: 000c0000 00040000 \"devcfg\"\n"));
-    LE_TEST(0 < fprintf(flashFdPtr, "mtd9: 000c0000 00040000 \"rpm\"\n"));
-    LE_TEST(0 < fprintf(flashFdPtr, "mtd10: 02000000 00040000 \"modem\"\n"));
-    LE_TEST(0 < fprintf(flashFdPtr, "mtd11: 00100000 00040000 \"aboot\"\n"));
-    LE_TEST(0 < fprintf(flashFdPtr, "mtd12: 00f00000 00040000 \"boot\"\n"));
-    LE_TEST(0 < fprintf(flashFdPtr, "mtd13: 01e00000 00040000 \"system\"\n"));
-    LE_TEST(0 < fprintf(flashFdPtr, "mtd14: 008c0000 00040000 \"lefwkro\"\n"));
-    LE_TEST(0 < fprintf(flashFdPtr, "mtd15: 01900000 00040000 \"swirw\"\n"));
-    LE_TEST(0 < fprintf(flashFdPtr, "mtd16: 08300000 00040000 \"userapp\"\n"));
-    LE_TEST(0 < fprintf(flashFdPtr, "mtd17: 03680000 00040000 \"reserved\"\n"));
-    LE_TEST(0 < fprintf(flashFdPtr, "mtd18: 02180000 00040000 \"slot_2\"\n"));
-    LE_TEST(0 < fprintf(flashFdPtr, "mtd19: 02180000 00040000 \"slot_1\"\n"));
-    LE_TEST(0 < fprintf(flashFdPtr, "mtd20: 02180000 00040000 \"slot_0\"\n"));
-    LE_TEST(0 == fclose(flashFdPtr));
-
-    LE_INFO("MTD file is created successfully.");
 
     writeSize = sizeof(ResumeCtxsave);
 
@@ -224,4 +140,42 @@ COMPONENT_INIT
     le_fs_Close(fd[1]);
 
     LE_INFO("Resume context files are created successfully.");
+
+    int iUbi;
+
+    // Loop only on UBI 0 (rootfs) 1 (modem) and 2 (lefwkro)
+    for( iUbi = 0; iUbi < 3; iUbi++ )
+    {
+        FILE *ubiFd;
+        char ubiPath[PATH_MAX];
+        char ubiVolName[PA_FLASH_UBI_MAX_VOLUMES];
+        int mtdNum;
+        pa_flash_Desc_t desc;
+        pa_flash_Info_t *mtdInfoPtr;
+        int iblk;
+
+        snprintf(ubiPath, sizeof(ubiPath), SYS_CLASS_UBI_PATH "/ubi%d/mtd_num", iUbi);
+        LE_ASSERT(NULL != (ubiFd = fopen(ubiPath, "r")));
+        fscanf(ubiFd, "%d", &mtdNum);
+        fclose(ubiFd);
+        snprintf(ubiPath, sizeof(ubiPath), SYS_CLASS_UBI_PATH "/ubi%d_0/name", iUbi);
+        LE_ASSERT(NULL != (ubiFd = fopen(ubiPath, "r")));
+        fscanf(ubiFd, "%s", ubiVolName);
+        fclose(ubiFd);
+        LE_ASSERT_OK(pa_flash_Open(mtdNum, PA_FLASH_OPENMODE_READWRITE, &desc, &mtdInfoPtr));
+        LE_ASSERT_OK(pa_flash_CreateUbi(desc, true));
+
+        uint8_t squashfs[mtdInfoPtr->eraseSize - 2 * mtdInfoPtr->writeSize];
+
+        LE_ASSERT_OK(pa_flash_CreateUbiVolume(desc, 0, ubiVolName, PA_FLASH_VOLUME_STATIC,
+                                              2 *sizeof(squashfs)));
+        LE_ASSERT_OK(pa_flash_ScanUbi(desc, 0));
+        memset(squashfs, 0xA0 | iUbi, sizeof(squashfs));
+        for( iblk = 0; iblk < 2; iblk++ )
+        {
+            LE_ASSERT_OK(pa_flash_WriteUbiAtBlock(desc, iblk, squashfs, sizeof(squashfs), true));
+        }
+        LE_ASSERT_OK(pa_flash_AdjustUbiSize(desc, 2 * sizeof(squashfs)));
+        LE_ASSERT_OK(pa_flash_Close(desc));
+    }
 }
