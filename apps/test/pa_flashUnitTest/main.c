@@ -81,6 +81,9 @@ static void Test_pa_flash_WriteCwe
     ctx.fullImageCrc = crc;
     ctx.flashPoolPtr = &FlashImgPool;
     ctx.cweHdrPtr = cweFullHdrPtr;
+    res = partition_OpenSwifotaPartition(&ctx, wrOff);
+    LE_TEST(LE_OK == res);
+
     sz = sizeof(cwe_Header_t);
     res = partition_WriteSwifotaPartition(&ctx, &sz, wrOff, (uint8_t*)cweFullHdrPtr, false, &iswr);
     LE_TEST(LE_OK == res);
@@ -103,6 +106,14 @@ static void Test_pa_flash_WriteCwe
     }
 
     ctx.cweHdrPtr = cweFullHdrPtr;
+    res = partition_ComputeDataCrc32SwifotaPartition(&ctx, sizeof(cwe_Header_t),
+                                                     8 * CHUNK_SIZE + sizeof(cwe_Header_t), &crc);
+    LE_TEST(LE_OK == res);
+    LE_TEST(crc == cweFullHdrPtr->crc32);
+
+    res = partition_CloseSwifotaPartition(&ctx, wrOff, false, NULL);
+    LE_TEST(LE_OK == res);
+
     res = partition_ComputeDataCrc32SwifotaPartition(&ctx, sizeof(cwe_Header_t),
                                                      8 * CHUNK_SIZE + sizeof(cwe_Header_t), &crc);
     LE_TEST(LE_OK == res);
@@ -131,8 +142,8 @@ static void Test_pa_flash_WriteDeltaCwe
     cwe_Header_t *cweHdrCPtr = (cwe_Header_t *)&body[12*CHUNK_SIZE + 3*sizeof(cwe_Header_t)];
     uint8_t *bodyCPtr = &body[12 * CHUNK_SIZE + 4*sizeof(cwe_Header_t)];
     bool iswr;
-    size_t sz, wrOff = 0;
-    uint32_t crc = LE_CRC_START_CRC32;
+    size_t sz, wrOff = 0, fullSz;
+    uint32_t crc = LE_CRC_START_CRC32, fullCrc;
     off_t start, end;
 
     memset(cweFullHdrPtr, 0xEE, sizeof(cwe_Header_t));
@@ -186,6 +197,9 @@ static void Test_pa_flash_WriteDeltaCwe
     ctx.fullImageCrc = crc;
     ctx.flashPoolPtr = &FlashImgPool;
     ctx.cweHdrPtr = cweFullHdrPtr;
+    res = partition_OpenSwifotaPartition(&ctx, wrOff);
+    LE_TEST(LE_OK == res);
+
     sz = sizeof(cwe_Header_t);
     res = partition_WriteSwifotaPartition(&ctx, &sz, wrOff, (uint8_t*)cweFullHdrPtr, false, &iswr);
     LE_TEST(LE_OK == res);
@@ -236,9 +250,10 @@ static void Test_pa_flash_WriteDeltaCwe
     sz = 0;
     res = partition_CloseUbiVolumeSwifotaPartition(&ctx, 4 * CHUNK_SIZE, false, &iswr);
     LE_TEST(LE_OK == res);
-    res = partition_ComputeUbiVolumeCrc32SwifotaPartition(&ctx, 0, &sz, &crc);
+    res = partition_ComputeUbiVolumeCrc32SwifotaPartition(&ctx, 0, &sz, &crc, &fullSz, &fullCrc);
     LE_TEST(LE_OK == res);
-    LE_INFO("SZ %u CSZ %zu CRC %08x CCRC %08x", cweHdrBPtr->imageSize, sz, cweHdrBPtr->crc32, crc);
+    LE_INFO("SZ %u CSZ %zu CFSZ %zu CRC %08x CCRC %08x CFCRC %08x",
+            cweHdrBPtr->imageSize, sz, fullSz, cweHdrBPtr->crc32, crc, fullCrc);
     res = partition_ComputeUbiCrc32SwifotaPartition(&ctx, (uint32_t*)&sz, &crc);
     LE_TEST(LE_OK == res);
     LE_INFO("SZ %zu CRC %08x", sz, crc);
@@ -269,9 +284,10 @@ static void Test_pa_flash_WriteDeltaCwe
     sz = 0;
     res = partition_CloseUbiVolumeSwifotaPartition(&ctx, -1, false, &iswr);
     LE_TEST(LE_OK == res);
-    res = partition_ComputeUbiVolumeCrc32SwifotaPartition(&ctx, 1, &sz, &crc);
+    res = partition_ComputeUbiVolumeCrc32SwifotaPartition(&ctx, 1, &sz, &crc, &fullSz, &fullCrc);
     LE_TEST(LE_OK == res);
-    LE_INFO("SZ %u CSZ %zu CRC %08x CCRC %08x", cweHdrCPtr->imageSize, sz, cweHdrCPtr->crc32, crc);
+    LE_INFO("SZ %u CSZ %zu CFSZ %zu CRC %08x CCRC %08x CFCRC %08x",
+            cweHdrBPtr->imageSize, sz, fullSz, cweHdrBPtr->crc32, crc, fullCrc);
     res = partition_ComputeUbiCrc32SwifotaPartition(&ctx, (uint32_t*)&sz, &crc);
     LE_TEST(LE_OK == res);
     LE_INFO("SZ %zu CRC %08x", sz, crc);
@@ -295,6 +311,9 @@ static void Test_pa_flash_WriteDeltaCwe
                                                      (end - start), &crc);
     LE_TEST(LE_OK == res);
     LE_INFO("FCRC %08x CRC %08x", ctx.fullImageCrc, crc);
+
+    res = partition_CloseSwifotaPartition(&ctx, wrOff, false, NULL);
+    LE_TEST(LE_OK == res);
 }
 
 //--------------------------------------------------------------------------------------------------

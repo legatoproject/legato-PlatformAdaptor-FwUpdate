@@ -22,7 +22,6 @@ if ($ENV{TARGET} MATCHES "localhost")
        fwupdateSinglesysInitComponent
        .
        -i ${LEGATO_ROOT}/platformAdaptor/fwupdate/apps/test/sys_flash
-       -i ${LEGATO_ROOT}/platformAdaptor/fwupdate/pa_patch/inc
        -i ${LEGATO_ROOT}/platformAdaptor/fwupdate/common
        -i ${LEGATO_FWUPDATE}
        -i ${LEGATO_FRAMEWORK_SRC}
@@ -36,6 +35,10 @@ if ($ENV{TARGET} MATCHES "localhost")
        ${LFLAGS}
        -C ${MKEXE_CFLAGS}
     )
+    file(COPY cp.cwe DESTINATION ${EXECUTABLE_OUTPUT_PATH}/../data)
+    file(COPY ls.cwe DESTINATION ${EXECUTABLE_OUTPUT_PATH}/../data)
+    file(COPY ls2cp.cwe DESTINATION ${EXECUTABLE_OUTPUT_PATH}/../data)
+    file(COPY cp2ls.cwe DESTINATION ${EXECUTABLE_OUTPUT_PATH}/../data)
     add_test(${TEST_EXEC} ${EXECUTABLE_OUTPUT_PATH}/${TEST_EXEC})
 
     # This is a C test

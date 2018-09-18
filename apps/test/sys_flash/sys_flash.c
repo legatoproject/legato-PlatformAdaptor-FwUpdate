@@ -35,8 +35,12 @@
  * Flash geometry: PEB erase size and write/page size
  */
 //--------------------------------------------------------------------------------------------------
+#ifndef SYS_FLASH_ERASESIZE
 #define SYS_FLASH_ERASESIZE    32768
+#endif
+#ifndef SYS_FLASH_WRITESIZE
 #define SYS_FLASH_WRITESIZE     1024
+#endif
 
 //--------------------------------------------------------------------------------------------------
 /**
@@ -309,6 +313,18 @@ int sys_flashWrite
 )
 {
     off_t here = lseek(fd, 0, SEEK_CUR);
+    char path[PATH_MAX];
+    char link[PATH_MAX];
+
+    snprintf(path, sizeof(path), "/proc/self/fd/%d", fd);
+    if(-1 == readlink( path, link, sizeof(link) ))
+    {
+        return -1;
+    }
+    if(memcmp(link, SYS_FLASH_PREFIX DEV_MTD_PATH, strlen(SYS_FLASH_PREFIX DEV_MTD_PATH)))
+    {
+        return write(fd, buf, count);
+    }
 
     if((here & (SYS_FLASH_WRITESIZE - 1)) || (count & (SYS_FLASH_WRITESIZE - 1)))
     {
@@ -387,6 +403,22 @@ int sys_flashUnlink
 
 //--------------------------------------------------------------------------------------------------
 /**
+ * Rename an entry
+ */
+//--------------------------------------------------------------------------------------------------
+int sys_flashRename
+(
+    const char *oldname,
+    const char *newname
+)
+{
+    char oldpath[PATH_MAX];
+    snprintf(oldpath, sizeof(oldpath), "%s", sys_FlashBuildPathName(oldname));
+    return rename(oldpath, sys_FlashBuildPathName(newname));
+}
+
+//--------------------------------------------------------------------------------------------------
+/**
  * Perform a shell command execution with system(3)
  */
 //--------------------------------------------------------------------------------------------------
@@ -395,12 +427,15 @@ int sys_flashSystem
     const char *command
 )
 {
-    if (0 == strcmp(command, "/sbin/reboot"))
+    if (0 == strncmp(command, "/sbin/reboot", 12))
     {
         errno = EPERM;
         return -1;
     }
-
+    else if (0 == strncmp(command, "/home/root/bspatch", 18))
+    {
+        return system(command);
+    }
     return 0x6400;
 }
 

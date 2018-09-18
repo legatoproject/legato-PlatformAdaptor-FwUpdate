@@ -192,28 +192,6 @@ void le_wdogChain_Kick
 
 //--------------------------------------------------------------------------------------------------
 /**
- * Sierra bsPatch function.
- *
- * @return
- *      - LE_OK             on success
- *      - others            Depending of the underlying operations
- */
-//--------------------------------------------------------------------------------------------------
-le_result_t bsPatch
-(
-    pa_patch_Context_t *patchContextPtr,
-                            ///< [IN] Context for the patch
-    char *patchfile,        ///< [IN] File containing the patch
-    uint32_t *crc32Ptr,     ///< [OUT] Pointer to return the CRC32 of the patch applied
-    bool lastPatch,         ///< [IN] True if this is the last patch in this context
-    bool forceClose         ///< [IN] Force close of device and resources
-)
-{
-    return LE_OK;
-}
-
-//--------------------------------------------------------------------------------------------------
-/**
  * Set bad image flag preventing concurrent partition access
  *
  * @return

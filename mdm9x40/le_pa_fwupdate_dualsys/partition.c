@@ -1355,6 +1355,17 @@ le_result_t partition_WriteUpdatePartition
             goto error;
         }
         InOffset = length - inOffsetSave;
+        while( InOffset >= FlashInfoPtr->eraseSize)
+        {
+            memcpy( DataPtr, dataPtr + inOffsetSave, FlashInfoPtr->eraseSize );
+            if (LE_OK != pa_flash_Write( MtdFd, DataPtr, FlashInfoPtr->eraseSize ))
+            {
+                LE_ERROR( "fwrite to nandwrite fails: %m" );
+                goto error;
+            }
+            inOffsetSave += FlashInfoPtr->eraseSize;
+            InOffset -= FlashInfoPtr->eraseSize;
+        }
         memcpy( DataPtr, dataPtr + inOffsetSave, InOffset );
     }
     else

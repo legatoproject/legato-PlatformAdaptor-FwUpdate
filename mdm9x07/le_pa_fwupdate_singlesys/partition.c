@@ -823,7 +823,8 @@ le_result_t partition_GetSwifotaOffsetPartition
     LE_DEBUG("offsetPtr 0x%lx InOffset 0x%zx", *offsetPtr, InOffset);
     if( LE_OK == res )
     {
-        *offsetPtr += InOffset;
+        *offsetPtr -= (IMG_BLOCK_OFFSET * FlashInfoPtr->eraseSize);
+        *offsetPtr += InOffset ;
     }
     return res;
 }
@@ -847,7 +848,256 @@ le_result_t partition_SetSwifotaOffsetPartition
     {
         return LE_FORMAT_ERROR;
     }
+    offset += (IMG_BLOCK_OFFSET * FlashInfoPtr->eraseSize);
     return pa_flash_SeekAtAbsOffset(MtdFd, offset);
+}
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Open the SWIFOTA partition for writing
+ *
+ * @return
+ *      - LE_OK on success
+ *      - LE_BUSY if the partition is already opened
+ *      - LE_OUT_OF_RANGE if the image size is greater than the partition size
+ *      - LE_FAULT on failure
+ */
+//--------------------------------------------------------------------------------------------------
+le_result_t partition_OpenSwifotaPartition
+(
+    partition_Ctx_t *ctxPtr,          ///< [INOUT] Context
+    size_t offset                     ///< [IN] Data offset in the package
+)
+{
+    int mtdNum;
+    le_result_t res = LE_FAULT;
+    uint32_t* fullImageCrc32Ptr = &ctxPtr->fullImageCrc;
+    const cwe_Header_t *hdrPtr = ctxPtr->cweHdrPtr;
+
+    // Open the partition if not already done and perform some checks before writing into it.
+    if (NULL == MtdFd)
+    {
+        int iblk = 0;
+
+        mtdNum = partition_GetMtdFromImageTypeOrName(0, "swifota", &MtdNamePtr);
+        if (-1 == mtdNum)
+        {
+            LE_ERROR( "Unable to find a valid mtd for image type \"swifota\"" );
+            return LE_FAULT;
+        }
+
+        if (LE_OK != partition_CheckIfMounted(mtdNum))
+        {
+            LE_ERROR("MTD %d is mounted", mtdNum);
+            return LE_FAULT;
+        }
+
+        if (LE_OK != pa_flash_Open(mtdNum,
+                                   PA_FLASH_OPENMODE_READWRITE | PA_FLASH_OPENMODE_MARKBAD,
+                                   &MtdFd,
+                                   &FlashInfoPtr))
+        {
+            LE_ERROR("Fails to open MTD %d", mtdNum );
+            return LE_FAULT;
+        }
+
+        if (LE_OK != pa_flash_Scan( MtdFd, NULL ))
+        {
+            LE_ERROR("Fails to scan MTD");
+            goto error;
+        }
+
+        // Check if the image size is compliant with partition size. For SWIFOTA, the first two
+        // blocks are reserved for Meta data.
+        if (hdrPtr->imageSize > (FlashInfoPtr->size - (IMG_BLOCK_OFFSET * FlashInfoPtr->eraseSize)))
+        {
+            LE_ERROR("Image size overlaps with the Meta data reserved blocks. Image size: %d,"
+                      "partition size: %d", hdrPtr->imageSize, FlashInfoPtr->size);
+            res = LE_OUT_OF_RANGE;
+            goto error;
+        }
+
+        DataPtr = le_mem_ForceAlloc(*ctxPtr->flashPoolPtr);
+        ImageSize = ctxPtr->fullImageSize;
+        InOffset = offset % FlashInfoPtr->eraseSize;
+
+        LE_DEBUG("ImageSize %zu (0x%08zx), InOffset %08zx", ImageSize, ImageSize, InOffset);
+
+        // If the data offset is not aligned on an erase block start address, we need to move back
+        // the already written data from flash to memory along with the new data.
+        if (InOffset)
+        {
+            InOffset = offset % FlashInfoPtr->eraseSize;
+            offset -= InOffset;
+
+            if (LE_OK != pa_flash_SeekAtOffset(MtdFd,
+                                               offset +
+                                               (IMG_BLOCK_OFFSET * FlashInfoPtr->eraseSize)))
+            {
+                LE_ERROR("Failed to seek block at offset: %zu", offset);
+                goto error;
+            }
+
+            if (LE_OK != pa_flash_Read(MtdFd, DataPtr, InOffset))
+            {
+                LE_ERROR( "Fread to nandwrite fails: %m" );
+                goto error;
+            }
+        }
+
+        // When offset is 0. It means that we are able to write the first chunk of data in the
+        // current partition.
+        if (offset == 0)
+        {
+            ctxPtr->logicalBlock = IMG_BLOCK_OFFSET;
+            ctxPtr->phyBlock = 0;
+            *fullImageCrc32Ptr = LE_CRC_START_CRC32;
+            iblk = 0;
+        }
+        else
+        {
+            iblk = offset / FlashInfoPtr->eraseSize + IMG_BLOCK_OFFSET;
+        }
+
+        // Erase blocks
+        for (; iblk < FlashInfoPtr->nbLeb; iblk++)
+        {
+            bool isBad;
+
+            if ((LE_OK != (res = pa_flash_CheckBadBlock(MtdFd, iblk, &isBad)))
+                && (res != LE_NOT_PERMITTED))
+            {
+                LE_ERROR("Fails to check bad block %d", iblk);
+                goto error;
+            }
+            if (isBad)
+            {
+                LE_WARN("Skipping bad block %d", iblk);
+            }
+            else
+            {
+                res = pa_flash_EraseBlock(MtdFd, iblk);
+                if ((LE_OK != res) && (res != LE_NOT_PERMITTED))
+                {
+                    LE_ERROR("Fails to erase block %d: res=%d", iblk, res);
+                    goto error;
+                }
+                if ((!ctxPtr->phyBlock) && (iblk >= ctxPtr->logicalBlock))
+                {
+                    ctxPtr->phyBlock = iblk;
+                }
+            }
+        }
+
+        if (LE_OK != pa_flash_SeekAtOffset(MtdFd,
+                                           offset + (IMG_BLOCK_OFFSET * FlashInfoPtr->eraseSize)))
+        {
+            LE_ERROR("Fails to seek block at %d", iblk);
+            goto error;
+        }
+    }
+    else
+    {
+        LE_CRIT("Partition \"%s\" is already opened", MtdNamePtr);
+        return LE_BUSY;
+    }
+    return LE_OK;
+
+error:
+    InOffset = 0;
+    if (MtdFd)
+    {
+        (void)pa_flash_Close( MtdFd );
+        MtdFd = NULL;
+    }
+    MtdNamePtr = NULL;
+    ImageSize = 0;
+    if (DataPtr)
+    {
+        le_mem_Release(DataPtr);
+        DataPtr = NULL;
+    }
+    return res;
+}
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Close the SWIFOTA partition. When closed, the flush of remaining data is forced.
+ *
+ * @return
+ *      - LE_OK on success
+ *      - LE_FAULT on failure
+ */
+//--------------------------------------------------------------------------------------------------
+le_result_t partition_CloseSwifotaPartition
+(
+    partition_Ctx_t *ctxPtr,          ///< [INOUT] Context
+    size_t offset,                    ///< [IN] Data offset in the package
+    bool forceClose,                  ///< [IN] Force close of device and resources
+    bool *isFlashedPtr                ///< [OUT] True if flash write was done
+)
+{
+    le_result_t ret = LE_OK;
+
+    if (forceClose)
+    {
+        // If forceClose set, close descriptor and release all resources
+        LE_CRIT( "Closing and releasing MTD due to forceClose" );
+        goto error;
+    }
+
+    uint32_t* fullImageCrc32Ptr = &ctxPtr->fullImageCrc;
+
+    if (InOffset)
+    {
+        if (InOffset <= FlashInfoPtr->eraseSize)
+        {
+            memset(DataPtr + InOffset,
+                   PA_FLASH_ERASED_VALUE,
+                   FlashInfoPtr->eraseSize - InOffset);
+        }
+        // set isFlashed before the write because even if the write returns an error
+        // some data could have been written in the flash
+        if (isFlashedPtr)
+        {
+            *isFlashedPtr = true;
+        }
+
+        if (LE_OK != pa_flash_Write(MtdFd, DataPtr, FlashInfoPtr->eraseSize))
+        {
+            LE_ERROR("fwrite to nandwrite fails: %m" );
+            goto error;
+        }
+        *fullImageCrc32Ptr = le_crc_Crc32(DataPtr, InOffset, *fullImageCrc32Ptr);
+    }
+
+    le_mem_Release(DataPtr);
+    pa_flash_Close(MtdFd);
+    MtdFd = NULL;
+    LE_INFO("Update for partiton %s done with return %d", MtdNamePtr, ret);
+    MtdNamePtr = NULL;
+    DataPtr = NULL;
+    ImageSize = 0;
+    InOffset = 0;
+
+    return LE_OK;
+
+error:
+    ret = LE_OK;
+    InOffset = 0;
+    if (MtdFd)
+    {
+        ret = pa_flash_Close( MtdFd );
+        MtdFd = NULL;
+    }
+    MtdNamePtr = NULL;
+    ImageSize = 0;
+    if (DataPtr)
+    {
+        le_mem_Release(DataPtr);
+        DataPtr = NULL;
+    }
+    return (forceClose ? ret : LE_FAULT);
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -983,7 +1233,7 @@ out:
             return res;
         }
     }
-    LE_INFO("Computed CRC32: 0x%08x Size %zu", crc32, rdsize);
+    LE_INFO("Offset %lx size %zu CRC %08x", inOffset, rdsize, crc32);
     if( crc32Ptr )
     {
         *crc32Ptr = crc32;
@@ -1025,136 +1275,11 @@ le_result_t partition_WriteSwifotaPartition
         return LE_FAULT;
     }
 
-    int mtdNum;
     le_result_t ret = LE_OK;
-    uint32_t* fullImageCrc32 = &ctxPtr->fullImageCrc;
-
+    uint32_t* fullImageCrc32Ptr = &ctxPtr->fullImageCrc;
     const cwe_Header_t *hdrPtr           = ctxPtr->cweHdrPtr;
 
     LE_INFO("Image type %"PRIu32" len %zu offset 0x%zx", hdrPtr->imageType, *lengthPtr, offset);
-
-    // Open the partition if not already done and perform some checks before writing into it.
-    if ((NULL == MtdFd) && (0 == ImageSize))
-    {
-        int iblk = 0;
-        le_result_t res;
-
-        mtdNum = partition_GetMtdFromImageTypeOrName(0, "swifota", &MtdNamePtr);
-        if (-1 == mtdNum)
-        {
-            LE_ERROR( "Unable to find a valid mtd for image type \"swifota\"" );
-            return LE_FAULT;
-        }
-
-        if (LE_OK != partition_CheckIfMounted(mtdNum))
-        {
-            LE_ERROR("MTD %d is mounted", mtdNum);
-            return LE_FAULT;
-        }
-
-        if (LE_OK != pa_flash_Open(mtdNum,
-                                   PA_FLASH_OPENMODE_READWRITE | PA_FLASH_OPENMODE_MARKBAD,
-                                   &MtdFd,
-                                   &FlashInfoPtr))
-        {
-            LE_ERROR("Fails to open MTD %d", mtdNum );
-            return LE_FAULT;
-        }
-
-        if (LE_OK != pa_flash_Scan( MtdFd, NULL ))
-        {
-            LE_ERROR("Fails to scan MTD");
-            goto error;
-        }
-
-        // Check if the image size is compliant with partition size. For SWIFOTA, the first two
-        // blocks are reserved for Meta data.
-        if (hdrPtr->imageSize > (FlashInfoPtr->size - (IMG_BLOCK_OFFSET * FlashInfoPtr->eraseSize)))
-        {
-            LE_ERROR("Image size overlaps with the Meta data reserved blocks. Image size: %d,"
-                      "partition size: %d", hdrPtr->imageSize, FlashInfoPtr->size);
-            goto error;
-        }
-
-        DataPtr = le_mem_ForceAlloc(*ctxPtr->flashPoolPtr);
-        ImageSize = ctxPtr->fullImageSize;
-        InOffset = offset % FlashInfoPtr->eraseSize;
-
-        LE_DEBUG("ImageSize %zu (0x%08zx), InOffset %08zx", ImageSize, ImageSize, InOffset);
-
-        // If the data offset is not aligned on an erase block start address, we need to move back
-        // the already written data from flash to memory along with the new data.
-        if (InOffset)
-        {
-            InOffset = offset % FlashInfoPtr->eraseSize;
-            offset -= InOffset;
-
-            if (LE_OK != pa_flash_SeekAtOffset(MtdFd,
-                                               offset +
-                                               (IMG_BLOCK_OFFSET * FlashInfoPtr->eraseSize)))
-            {
-                LE_ERROR("Failed to seek block at offset: %zu", offset);
-                goto error;
-            }
-
-            if (LE_OK != pa_flash_Read(MtdFd, DataPtr, InOffset))
-            {
-                LE_ERROR( "Fread to nandwrite fails: %m" );
-                goto error;
-            }
-        }
-
-        // When offset is 0. It means that we are about to write the first chunk of data in the
-        // current partition.
-        if (offset == 0)
-        {
-            ctxPtr->logicalBlock = IMG_BLOCK_OFFSET;
-            ctxPtr->phyBlock = 0;
-            *fullImageCrc32 = LE_CRC_START_CRC32;
-            iblk = 0;
-        }
-        else
-        {
-            iblk = offset / FlashInfoPtr->eraseSize + IMG_BLOCK_OFFSET;
-        }
-
-        // Erase blocks
-        for (; iblk < FlashInfoPtr->nbLeb; iblk++)
-        {
-            bool isBad;
-
-            if ((LE_OK != (res = pa_flash_CheckBadBlock(MtdFd, iblk, &isBad)))
-                && (res != LE_NOT_PERMITTED))
-            {
-                LE_ERROR("Fails to check bad block %d", iblk);
-                goto error;
-            }
-            if (isBad)
-            {
-                LE_WARN("Skipping bad block %d", iblk);
-            }
-            else
-            {
-                res = pa_flash_EraseBlock(MtdFd, iblk);
-                if ((LE_OK != res) && (res != LE_NOT_PERMITTED))
-                {
-                    LE_ERROR("Fails to erase block %d: res=%d", iblk, res);
-                    goto error;
-                }
-                if ((!ctxPtr->phyBlock) && (iblk >= ctxPtr->logicalBlock))
-                {
-                    ctxPtr->phyBlock = iblk;
-                }
-            }
-        }
-
-        if (LE_OK != pa_flash_SeekAtOffset(MtdFd,
-                                           offset + (IMG_BLOCK_OFFSET * FlashInfoPtr->eraseSize)))
-        {
-            LE_ERROR("Fails to seek block at %d", iblk);
-            goto error;
-        }
-    }
 
     if ((NULL == FlashInfoPtr) || (NULL == DataPtr))
     {
@@ -1178,7 +1303,7 @@ le_result_t partition_WriteSwifotaPartition
             LE_ERROR( "fwrite to nandwrite fails: %m" );
             goto error;
         }
-        *fullImageCrc32 = le_crc_Crc32(DataPtr, FlashInfoPtr->eraseSize, *fullImageCrc32);
+        *fullImageCrc32Ptr = le_crc_Crc32(DataPtr, FlashInfoPtr->eraseSize, *fullImageCrc32Ptr);
         InOffset = 0;
         *lengthPtr = inOffsetSave;
     }
@@ -1188,50 +1313,6 @@ le_result_t partition_WriteSwifotaPartition
         InOffset += *lengthPtr;
     }
 
-    if ((*lengthPtr + offset) >= ImageSize)
-    {
-        uint32_t reservedOffset = FlashInfoPtr->eraseSize * 2;
-        if (InOffset)
-        {
-            if (InOffset <= FlashInfoPtr->eraseSize)
-            {
-                memset(DataPtr + InOffset,
-                       PA_FLASH_ERASED_VALUE,
-                       FlashInfoPtr->eraseSize - InOffset);
-            }
-            // set isFlashed before the write because even if the write returns an error
-            // some data could have been written in the flash
-            if (isFlashedPtr)
-            {
-                *isFlashedPtr = true;
-            }
-
-            if (LE_OK != pa_flash_Write(MtdFd, DataPtr, FlashInfoPtr->eraseSize))
-            {
-                LE_ERROR("fwrite to nandwrite fails: %m" );
-                goto error;
-            }
-            *fullImageCrc32 = le_crc_Crc32(DataPtr, InOffset, *fullImageCrc32);
-        }
-
-        le_mem_Release(DataPtr);
-        pa_flash_Close(MtdFd);
-        MtdFd = NULL;
-        LE_INFO("Update for partiton %s done with return %d", MtdNamePtr, ret);
-        MtdNamePtr = NULL;
-
-        mtdNum = partition_GetMtdFromImageTypeOrName( 0, "swifota", &MtdNamePtr);
-        if (-1 == mtdNum)
-        {
-            LE_ERROR("Unable to find a valid mtd for \"swifota\"" );
-            return LE_FAULT;
-        }
-        ret = partition_CheckData(mtdNum, ImageSize, reservedOffset,
-                                  *fullImageCrc32, *ctxPtr->flashPoolPtr, false);
-        DataPtr = NULL;
-        ImageSize = 0;
-        InOffset = 0;
-    }
     return ret;
 
 error:
@@ -1270,7 +1351,7 @@ le_result_t partition_OpenUbiSwifotaPartition
 {
     off_t mtdOffset;
     le_result_t res;
-    uint32_t* fullImageCrc32 = &ctxPtr->fullImageCrc;
+    uint32_t* fullImageCrc32Ptr = &ctxPtr->fullImageCrc;
 
     res = pa_flash_Tell(MtdFd, NULL, NULL, &mtdOffset);
     if( LE_OK != res )
@@ -1298,7 +1379,7 @@ le_result_t partition_OpenUbiSwifotaPartition
             LE_ERROR("fwrite to nandwrite fails: %m" );
             return res;
         }
-        *fullImageCrc32 = le_crc_Crc32(DataPtr, InOffset, *fullImageCrc32);
+        *fullImageCrc32Ptr = le_crc_Crc32(DataPtr, InOffset, *fullImageCrc32Ptr);
     }
     UbiOffset = mtdOffset + InOffset;
     UbiVolId = (uint32_t)-1;
@@ -1611,7 +1692,7 @@ le_result_t partition_WriteUbiSwifotaPartition
 {
     le_result_t res = LE_OK;
     size_t ubiDataSize = FlashInfoPtr->eraseSize - (2 * FlashInfoPtr->writeSize);
-    uint32_t* fullImageCrc32 = &ctxPtr->fullImageCrc;
+    uint32_t* fullImageCrc32Ptr = &ctxPtr->fullImageCrc;
 
     if (forceClose)
     {
@@ -1636,14 +1717,14 @@ le_result_t partition_WriteUbiSwifotaPartition
             *isFlashedPtr = true;
         }
 
-        LE_DEBUG("pa_flash_WriteUbiAtBlock(%u %zu)", UbiWriteLeb,ubiDataSize);
+        LE_DEBUG("pa_flash_WriteUbiAtBlock(%u %zu)", UbiWriteLeb, ubiDataSize);
         res = pa_flash_WriteUbiAtBlock(MtdFd, UbiWriteLeb, DataPtr, ubiDataSize, true);
         if (LE_OK != res)
         {
             LE_ERROR("pa_flash_WriteUbi %u %zu fails: %d", UbiWriteLeb, ubiDataSize, res);
             return res;
         }
-        *fullImageCrc32 = le_crc_Crc32(DataPtr, ubiDataSize, *fullImageCrc32);
+        *fullImageCrc32Ptr = le_crc_Crc32(DataPtr, ubiDataSize, *fullImageCrc32Ptr);
         InOffset = 0;
         *lengthPtr = inOffsetSave;
         UbiWriteLeb++;
@@ -1690,13 +1771,15 @@ le_result_t partition_ComputeUbiVolumeCrc32SwifotaPartition
     partition_Ctx_t *ctxPtr,          ///< [INOUT] Context
     uint32_t ubiVolId,                ///< [IN] UBI volume id
     size_t* sizePtr,                  ///< [OUT] UBI volume size
-    uint32_t* crc32Ptr                ///< [OUT] CRC32 computed on the UBI volume
+    uint32_t* crc32Ptr,               ///< [OUT] CRC32 computed on the UBI volume
+    size_t* fullSizePtr,              ///< [OUT] UBI volume size with padded data to the end of PEB
+    uint32_t* fullCrc32Ptr            ///< [OUT] CRC32 computed on the data padded to the end of PEB
 )
 {
     off_t atOffset;
-    size_t size, volSize = 0;
+    size_t size, volSize = 0, fullSize = 0;
     uint32_t iPeb, volPeb;
-    uint32_t crc32 = LE_CRC_START_CRC32;
+    uint32_t crc32 = LE_CRC_START_CRC32, fullCrc32 = LE_CRC_START_CRC32;
     uint8_t* blockPtr = NULL;
     le_result_t res, crcRes = LE_OK;
 
@@ -1746,6 +1829,8 @@ le_result_t partition_ComputeUbiVolumeCrc32SwifotaPartition
         LE_DEBUG3("%hhX %hhX %hhX %hhX %hhX %hhX %hhX %hhX",
                   blockPtr[0x2000+0], blockPtr[0x2000+1], blockPtr[0x2000+2], blockPtr[0x2000+3],
                   blockPtr[0x2000+4], blockPtr[0x2000+5], blockPtr[0x2000+6], blockPtr[0x2000+7]);
+        fullSize += size;
+        fullCrc32 = le_crc_Crc32( blockPtr, size, fullCrc32 );
         if( (volPeb - 1) == iPeb )
         {
             (void)partition_CalculateDataLength( blockPtr, &size );
@@ -1762,7 +1847,8 @@ le_result_t partition_ComputeUbiVolumeCrc32SwifotaPartition
         LE_ERROR("pa_flash_SeekAtAbsOffset fails: %d", res);
         return res;
     }
-    LE_INFO("Computed CRC32: 0x%08x Size %zu", crc32, volSize);
+    LE_INFO("Computed: CRC32 0x%08x Size %zu Full CRC32 0x%08x Full Size %zu",
+            crc32, volSize, fullCrc32, fullSize);
     if( crc32Ptr )
     {
         *crc32Ptr = crc32;
@@ -1770,6 +1856,14 @@ le_result_t partition_ComputeUbiVolumeCrc32SwifotaPartition
     if( sizePtr )
     {
         *sizePtr = volSize;
+    }
+    if( fullCrc32Ptr )
+    {
+        *fullCrc32Ptr = fullCrc32;
+    }
+    if( fullSizePtr )
+    {
+        *fullSizePtr = fullSize;
     }
     return crcRes;
 }

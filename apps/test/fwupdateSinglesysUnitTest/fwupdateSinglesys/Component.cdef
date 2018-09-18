@@ -11,12 +11,13 @@ cflags:
 {
     -I${LEGATO_ROOT}/components/watchdogChain
     -I${LEGATO_ROOT}/platformAdaptor/fwupdate/pa_flash/inc
-    -I${LEGATO_ROOT}/platformAdaptor/fwupdate/pa_patch/inc
     -I${LEGATO_ROOT}/platformAdaptor/fwupdate/common
     -I${LEGATO_ROOT}/platformAdaptor/fwupdate/mdm9x07/le_pa_fwupdate_singlesys
+    -I${LEGATO_ROOT}/3rdParty/bsdiff-4.3
     -DLE_MEM_VALGRIND
     -DPA_FWUPDATE_APP_PRODUCT_ID=0x59393231
     -DPA_FWUPDATE_USR_PRODUCT_ID=0x39583238
+    -DSIERRA_BSPATCH
     -Dfopen=sys_flashFOpen
     -Dopen=sys_flashOpen
     -Dioctl=sys_flashIoctl
@@ -25,14 +26,22 @@ cflags:
     -Dsystem=sys_flashSystem
 }
 
+ldflags:
+{
+    -lbz2
+}
+
 sources:
 {
     ${LEGATO_ROOT}/platformAdaptor/fwupdate/pa_flash/src/pa_flash_mtd.c
     ${LEGATO_ROOT}/platformAdaptor/fwupdate/mdm9x07/le_pa_fwupdate_singlesys/pa_flash_ubi.c
     ${LEGATO_ROOT}/platformAdaptor/fwupdate/mdm9x07/le_pa_fwupdate_singlesys/partition.c
     ${LEGATO_ROOT}/platformAdaptor/fwupdate/mdm9x07/le_pa_fwupdate_singlesys/pa_fwupdate_singlesys.c
+    ${LEGATO_ROOT}/platformAdaptor/fwupdate/mdm9x07/le_pa_fwupdate_singlesys/deltaUpdate.c
+    ${LEGATO_ROOT}/platformAdaptor/fwupdate/mdm9x07/le_pa_fwupdate_singlesys/pa_patch.c
     ${LEGATO_ROOT}/platformAdaptor/fwupdate/common/cwe.c
     ${LEGATO_ROOT}/platformAdaptor/fwupdate/common/utils.c
+    ${LEGATO_ROOT}/3rdParty/bsdiff-4.3/bspatch.c
     fwupdate_stubs.c
     wdg_stubs.c
 }

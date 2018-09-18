@@ -10,3 +10,10 @@ sources:
 {
     main.c
 }
+
+cflags:
+{
+    -Dfopen=sys_flashFOpen
+    -Dopen=sys_flashOpen
+    -Dopendir=sys_flashOpendir
+}

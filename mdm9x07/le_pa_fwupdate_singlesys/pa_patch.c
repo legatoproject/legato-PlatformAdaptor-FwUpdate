@@ -8,6 +8,7 @@
 #include "legato.h"
 #include "pa_patch.h"
 #include "pa_flash.h"
+#include "partition_local.h"
 
 //--------------------------------------------------------------------------------------------------
 /**
@@ -65,7 +66,6 @@ le_result_t pa_patch_Open
 {
     pa_patch_InternalDesc_t *descPtr = NULL;
     pa_flash_OpenMode_t origMode = 0;
-    pa_flash_OpenMode_t destMode = 0;
     le_result_t res = LE_FAULT;
 
     if( (!ctx) || (!desc) || (!origDataPtr) || (!destDataPtr) )
@@ -107,40 +107,17 @@ le_result_t pa_patch_Open
              origMode |= (PA_FLASH_OPENMODE_READONLY|PA_FLASH_OPENMODE_MARKBAD);
              if( descPtr->context.origImageDesc.flash.isLogical )
              {
-                 origMode |= PA_FLASH_OPENMODE_LOGICAL;
-                 if( descPtr->context.origImageDesc.flash.isDual )
-                 {
-                     origMode |= PA_FLASH_OPENMODE_LOGICAL_DUAL;
-                 }
-             }
-             destMode |= (PA_FLASH_OPENMODE_READWRITE|PA_FLASH_OPENMODE_MARKBAD);
-             if( descPtr->context.destImageDesc.flash.isLogical )
-             {
-                 destMode |= PA_FLASH_OPENMODE_LOGICAL;
-                 if( descPtr->context.destImageDesc.flash.isDual )
-                 {
-                     destMode |= PA_FLASH_OPENMODE_LOGICAL_DUAL;
-                 }
-             }
-             res = pa_flash_Open( descPtr->context.origImageDesc.flash.mtdNum,
-                                         origMode,
-                                         &(descPtr->flashOrigDesc),
-                                         &(descPtr->flashOrigInfo) );
-             if( LE_OK != res )
-             {
-                 LE_ERROR("Failed to open origin flash device %d: %d\n",
-                          descPtr->context.origImageDesc.flash.mtdNum,
-                          res);
+                 res = LE_UNSUPPORTED;
                  goto erroropen;
              }
-             res = pa_flash_Open( descPtr->context.destImageDesc.flash.mtdNum,
-                                         destMode,
-                                         &(descPtr->flashDestDesc),
-                                         &(descPtr->flashDestInfo) );
+             res = pa_flash_Open( descPtr->context.origImageDesc.flash.mtdNum,
+                                  origMode,
+                                  &(descPtr->flashOrigDesc),
+                                  &(descPtr->flashOrigInfo) );
              if( LE_OK != res )
              {
-                 LE_ERROR("Failed to open destination flash device %d: %d\n",
-                          descPtr->context.destImageDesc.flash.mtdNum,
+                 LE_ERROR("Failed to open origin flash device %d: %d",
+                          descPtr->context.origImageDesc.flash.mtdNum,
                           res);
                  goto erroropen;
              }
@@ -149,7 +126,7 @@ le_result_t pa_patch_Open
                  ((descPtr->context.segmentSize / descPtr->flashOrigInfo->eraseSize) *
                   descPtr->flashOrigInfo->eraseSize) )
              {
-                 LE_ERROR("Segment size %zx is not a multiple of flash erase blocks %x:\n",
+                 LE_ERROR("Segment size %zx is not a multiple of flash erase blocks %x:",
                           descPtr->context.segmentSize, (descPtr->flashOrigInfo)->eraseSize);
                  res = LE_OUT_OF_RANGE;
                  goto erroropen;
@@ -158,25 +135,15 @@ le_result_t pa_patch_Open
              res = pa_flash_Scan( descPtr->flashOrigDesc, &(descPtr->flashOrigLebToPeb) );
              if( LE_OK != res )
              {
-                 LE_ERROR("Failed to scan origin flash device %d: %d\n",
+                 LE_ERROR("Failed to scan origin flash device %d: %d",
                           descPtr->context.origImageDesc.flash.mtdNum,
-                          res);
-                 goto erroropen;
-             }
-             res = pa_flash_Scan( descPtr->flashDestDesc, &(descPtr->flashDestLebToPeb) );
-             if( LE_OK != res )
-             {
-                 LE_ERROR("Failed to scan destination flash device %d: %d\n",
-                          descPtr->context.destImageDesc.flash.mtdNum,
                           res);
                  goto erroropen;
              }
              break;
         case PA_PATCH_IMAGE_UBIFLASH:
              origMode |= PA_FLASH_OPENMODE_UBI;
-             destMode |= PA_FLASH_OPENMODE_UBI;
              origMode |= (PA_FLASH_OPENMODE_READONLY|PA_FLASH_OPENMODE_MARKBAD);
-             destMode |= (PA_FLASH_OPENMODE_READWRITE|PA_FLASH_OPENMODE_MARKBAD);
              if( (descPtr->context.origImageDesc.flash.isLogical) ||
                  (descPtr->context.destImageDesc.flash.isLogical) )
              {
@@ -185,24 +152,13 @@ le_result_t pa_patch_Open
                  goto erroropen;
              }
              res = pa_flash_Open( descPtr->context.origImageDesc.flash.mtdNum,
-                                         origMode,
-                                         &(descPtr->flashOrigDesc),
-                                         &(descPtr->flashOrigInfo) );
+                                  origMode,
+                                  &(descPtr->flashOrigDesc),
+                                  &(descPtr->flashOrigInfo) );
              if( LE_OK != res )
              {
-                 LE_ERROR("Failed to open origin flash device %d: %d\n",
+                 LE_ERROR("Failed to open origin flash device %d: %d",
                           descPtr->context.origImageDesc.flash.mtdNum,
-                          res);
-                 goto erroropen;
-             }
-             res = pa_flash_Open( descPtr->context.destImageDesc.flash.mtdNum,
-                                         destMode,
-                                         &(descPtr->flashDestDesc),
-                                         &(descPtr->flashDestInfo) );
-             if( LE_OK != res )
-             {
-                 LE_ERROR("Failed to open destination flash device %d: %d\n",
-                          descPtr->context.destImageDesc.flash.mtdNum,
                           res);
                  goto erroropen;
              }
@@ -210,7 +166,7 @@ le_result_t pa_patch_Open
              if( (descPtr->context.segmentSize != (descPtr->flashOrigInfo->eraseSize -
                                                    (2 * descPtr->flashOrigInfo->writeSize))) )
              {
-                 LE_ERROR("Segment size %zx is not compatible with UBI structure %x:\n",
+                 LE_ERROR("Segment size %zx is not compatible with UBI structure %x:",
                           descPtr->context.segmentSize, descPtr->flashOrigInfo->writeSize);
                  res = LE_OUT_OF_RANGE;
                  goto erroropen;
@@ -219,25 +175,15 @@ le_result_t pa_patch_Open
                                      descPtr->context.origImageDesc.flash.ubiVolId );
              if( LE_OK != res )
              {
-                 LE_ERROR("Failed to scan UBI origin flash device %d, UBI volume %d: %d\n",
+                 LE_ERROR("Failed to scan UBI origin flash device %d, UBI volume %d: %d",
                           descPtr->context.origImageDesc.flash.mtdNum,
-                          descPtr->context.origImageDesc.flash.ubiVolId,
-                          res);
-                 goto erroropen;
-             }
-             res = pa_flash_ScanUbi( descPtr->flashDestDesc,
-                                     descPtr->context.destImageDesc.flash.ubiVolId );
-             if( LE_OK != res )
-             {
-                 LE_ERROR("Failed to scan UBI origin flash device %d, UBI volume %d: %d\n",
-                          descPtr->context.destImageDesc.flash.mtdNum,
                           descPtr->context.origImageDesc.flash.ubiVolId,
                           res);
                  goto erroropen;
              }
              break;
         default:
-             LE_ERROR("Unsupported Image %d\n", descPtr->context.origImage);
+             LE_ERROR("Unsupported Image %d", descPtr->context.origImage);
              goto erroropen;
     }
     descPtr->origDataPtr = le_mem_ForceAlloc(PatchSegmentPool);
@@ -289,8 +235,7 @@ le_result_t pa_patch_Close
 )
 {
     pa_patch_InternalDesc_t *descPtr = (pa_patch_InternalDesc_t *)desc;
-    uint32_t blk;
-    le_result_t res = LE_OK;;
+    le_result_t res = LE_OK;
 
     if( (!desc) || (descPtr->magic != desc) )
     {
@@ -298,29 +243,6 @@ le_result_t pa_patch_Close
     }
 
     descPtr->magic = NULL;
-
-    if( update )
-    {
-        LE_DEBUG("update %d, destSize = %zx\n", update, destSize );
-        switch( descPtr->context.destImage )
-        {
-            case PA_PATCH_IMAGE_RAWFLASH:
-                 blk = (destSize + (descPtr->flashDestInfo->eraseSize - 1))
-                        / descPtr->flashDestInfo->eraseSize;
-                 LE_DEBUG("Last block %u used by patch\n", blk );
-                 for( ; blk < descPtr->flashDestInfo->nbLeb; blk++ )
-                 {
-                     LE_DEBUG("Erasing remaing block %u\n", blk);
-                     pa_flash_EraseBlock( descPtr->flashDestDesc, blk );
-                 }
-                 break;
-            case PA_PATCH_IMAGE_UBIFLASH:
-                 res = pa_flash_AdjustUbiSize( descPtr->flashDestDesc, destSize );
-                 break;
-            default:
-                 break;
-        }
-    }
 
     if( descPtr->flashDestDesc )
     {
@@ -347,7 +269,7 @@ le_result_t pa_patch_Close
 
 //--------------------------------------------------------------------------------------------------
 /**
- * Read data starting the given block. If a Bad block is detected,
+ * Read data starting the given block. If a bad block is detected,
  * the error LE_IO_ERROR is returned and operation is aborted.
  * Note that the length should not be greater than eraseSize
  *
@@ -365,7 +287,6 @@ le_result_t pa_patch_ReadSegment
     off_t offset,             ///< [IN] Offset of the data to read
     uint8_t *dataPtr,         ///< [IN] Pointer to data to be read
     size_t *dataSizePtr       ///< [OUT] Pointer to real amount of data read
-
 )
 {
     pa_patch_InternalDesc_t *descPtr = (pa_patch_InternalDesc_t *)desc;
@@ -416,14 +337,15 @@ le_result_t pa_patch_ReadSegment
                                             blk, descPtr->origDataPtr, &size);
              *dataSizePtr = size;
              return res;
+        default:
+             break;
     }
     return LE_UNSUPPORTED;
 }
 
 //--------------------------------------------------------------------------------------------------
 /**
- * Write data starting the given block. If a Bad block is detected,
- * the error LE_IO_ERROR is returned and operation is aborted.
+ * Write data starting the given block.
  * Note that the block should be erased before the first write (pa_patch_EraseAtBlock)
  * Note that the length should be a multiple of writeSize and should not be greater than eraseSize
  *
@@ -444,7 +366,9 @@ le_result_t pa_patch_WriteSegment
 )
 {
     pa_patch_InternalDesc_t *descPtr = (pa_patch_InternalDesc_t *)desc;
-    int blk, maxblk;
+    int blk;
+    size_t theSize;
+    uint32_t remSize;
     off_t blkOff;
     le_result_t res;
 
@@ -453,49 +377,29 @@ le_result_t pa_patch_WriteSegment
         return LE_BAD_PARAMETER;
     }
 
+    (void)partition_GetSwifotaOffsetPartition( &blkOff );
     switch( descPtr->context.destImage )
     {
         case PA_PATCH_IMAGE_RAWFLASH:
-            maxblk = (newSize + (descPtr->flashDestInfo->eraseSize - 1))
-                     / descPtr->flashDestInfo->eraseSize;
-            for( blk = 0; blk < maxblk; blk++ )
+            for( blk = 0, remSize = newSize; remSize ; remSize -= theSize, blk += theSize )
             {
-                blkOff = (blk * descPtr->flashDestInfo->eraseSize) + offset;
-
-                LE_DEBUG("Erase and write blk %d, size %d at %lx to %x\n",
-                         blk, descPtr->flashDestInfo->eraseSize, blkOff,
-                         blk * descPtr->flashDestInfo->eraseSize );
-                LE_DEBUG("Erase and write blk %d, blkOff=%lx, _ph_offset=%lx\n",
-                         blk, blkOff, offset);
-                res = pa_flash_EraseBlock( descPtr->flashDestDesc,
-                                           blkOff / descPtr->flashDestInfo->eraseSize );
+                theSize = (remSize > descPtr->flashOrigInfo->eraseSize
+                              ? descPtr->flashOrigInfo->eraseSize
+                              : remSize);
+                res = partition_WriteSwifotaPartition((partition_Ctx_t*)descPtr->context.destArg1,
+                                                      &theSize,
+                                                      offset + blk,
+                                                      &dataPtr[blk],
+                                                      false, NULL);
                 if (LE_OK != res)
                 {
+                    LE_ERROR("partition_WriteSwifotaPartition() fails: %d", res);
                     return res;
                 }
-                res = pa_flash_SeekAtOffset( descPtr->flashDestDesc, blkOff );
-                if (LE_OK != res)
-                {
-                    return res;
-                }
-                res = pa_flash_Write( descPtr->flashDestDesc,
-                                      &dataPtr[blk * descPtr->flashDestInfo->eraseSize],
-                                      descPtr->flashDestInfo->eraseSize);
-                if (LE_OK != res)
-                {
-                    return res;
-                }
+                *((size_t*)descPtr->context.destArg2) += theSize;
             }
             break;
         case PA_PATCH_IMAGE_UBIFLASH:
-             blk = offset / descPtr->context.segmentSize;
-             res = pa_flash_WriteUbiAtBlock( descPtr->flashDestDesc,
-                                             blk,
-                                             descPtr->destDataPtr,
-                                             (newSize + (descPtr->flashDestInfo->writeSize - 1)) &
-                                             ~(descPtr->flashDestInfo->writeSize - 1),
-                                             true);
-             return res;
         default:
             return LE_UNSUPPORTED;
     }

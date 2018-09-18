@@ -62,6 +62,7 @@ static const char ImageString [CWE_IMAGE_TYPE_COUNT][sizeof(uint32_t)] =
     { 'C', 'U', 'S', '1' },     ///<  Customer 0 or 1 image in dual system
     { 'C', 'U', 'S', '2' },     ///<  Customer 2 image
     { 'H', 'A', 'S', 'H' },     ///<  Hash
+    { 'M', 'E', 'T', 'A' },     ///<  Meta CWE header for delta update
 };
 
 //--------------------------------------------------------------------------------------------------

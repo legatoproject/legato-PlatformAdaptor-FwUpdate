@@ -29,7 +29,8 @@ typedef enum
 {
     PA_PATCH_IMAGE_RAWFLASH = 0,     ///< RAW flash
     PA_PATCH_IMAGE_UBIFLASH,         ///< UBI data info RAW flash
-    PA_PATCH_IMAGE_MAX      = PA_PATCH_IMAGE_UBIFLASH,
+    PA_PATCH_IMAGE_SWIFOTA,          ///< Update partiton for single systems
+    PA_PATCH_IMAGE_MAX      = PA_PATCH_IMAGE_SWIFOTA,
 }
 pa_patch_Image_t;
 
@@ -75,6 +76,8 @@ typedef struct
     size_t               destImageSize;  ///< Full size of the image for destination
     uint32_t             destImageCrc32; ///< CRC32 of the image for destination
     pa_patch_ImageDesc_t destImageDesc;  ///< Device description for destination
+    void*                destArg1;       ///< 1st argument to pass for SWIFOTA partition
+    void*                destArg2;       ///< 2nd argument to pass for SWIFOTA partition
 }
 pa_patch_Context_t;
 
@@ -131,7 +134,7 @@ le_result_t pa_patch_Close
 
 //--------------------------------------------------------------------------------------------------
 /**
- * Read data starting the given block. If a Bad block is detected,
+ * Read data starting the given block. If a bad block is detected,
  * the error LE_IO_ERROR is returned and operation is aborted.
  * Note that the length should not be greater than eraseSize
  *
@@ -153,8 +156,7 @@ le_result_t pa_patch_ReadSegment
 
 //--------------------------------------------------------------------------------------------------
 /**
- * Write data starting the given block. If a Bad block is detected,
- * the error LE_IO_ERROR is returned and operation is aborted.
+ * Write data starting the given block.
  * Note that the block should be erased before the first write (pa_patch_EraseAtBlock)
  * Note that the length should be a multiple of writeSize and should not be greater than eraseSize
  *

@@ -190,6 +190,39 @@ le_result_t partition_SetSwifotaOffsetPartition
 
 //--------------------------------------------------------------------------------------------------
 /**
+ * Open the SWIFOTA partition for writing
+ *
+ * @return
+ *      - LE_OK on success
+ *      - LE_BUSY if the partition is already opened
+ *      - LE_FAULT on failure
+ */
+//--------------------------------------------------------------------------------------------------
+le_result_t partition_OpenSwifotaPartition
+(
+    partition_Ctx_t *ctxPtr,          ///< [INOUT] Context
+    size_t offset                     ///< [IN] Data offset in the package
+);
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Close the SWIFOTA partition. When closed, the flush of remaining data is forced.
+ *
+ * @return
+ *      - LE_OK on success
+ *      - LE_FAULT on failure
+ */
+//--------------------------------------------------------------------------------------------------
+le_result_t partition_CloseSwifotaPartition
+(
+    partition_Ctx_t *ctxPtr,          ///< [INOUT] Context
+    size_t offset,                    ///< [IN] Data offset in the package
+    bool forceClose,                  ///< [IN] Force close of device and resources
+    bool *isFlashedPtr                ///< [OUT] True if flash write was done
+);
+
+//--------------------------------------------------------------------------------------------------
+/**
  * Compute the CRC32 of the DATA in UPDATE partitions
  *
  * @return
@@ -341,7 +374,9 @@ le_result_t partition_ComputeUbiVolumeCrc32SwifotaPartition
     partition_Ctx_t *ctxPtr,          ///< [INOUT] Context
     uint32_t ubiVolId,                ///< [IN] UBI volume ID
     size_t* sizePtr,                  ///< [OUT] UBI volume size
-    uint32_t* crc32Ptr                ///< [OUT] CRC32 computed on the UBI volume
+    uint32_t* crc32Ptr,               ///< [OUT] CRC32 computed on the UBI volume
+    size_t* fullSizePtr,              ///< [OUT] UBI volume size with padded data to the end of PEB
+    uint32_t* fullCrc32Ptr            ///< [OUT] CRC32 computed on the data padded to the end of PEB
 );
 
 //--------------------------------------------------------------------------------------------------
