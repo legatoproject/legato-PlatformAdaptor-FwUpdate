@@ -129,6 +129,22 @@ le_result_t partition_CheckIfUbiAndGetUbiVolumes
 
 //--------------------------------------------------------------------------------------------------
 /**
+ * Get an UBI partition's block valid data length
+ *
+ * @return
+ *      - LE_OK       on success
+ *      - LE_FAULT    on failure
+ */
+//--------------------------------------------------------------------------------------------------
+le_result_t partition_GetUbiBlockValidDataLen
+(
+    uint32_t* dataLenPtr,                ///< [OUT] valid data length
+    int pgSize,                          ///< [IN] page size
+    uint8_t* flashBlockPtr               ///< [IN] flash data pointer
+);
+
+//--------------------------------------------------------------------------------------------------
+/**
  * Check if data flashed into a partition are correctly written
  *
  * @return
@@ -146,7 +162,8 @@ le_result_t partition_CheckData
     off_t atOffset,                    ///< [IN] Force offset to start from
     uint32_t crc32ToCheck,             ///< [IN] Expected CRC 32
     le_mem_PoolRef_t flashImgPool,     ///< [IN] memory pool
-    bool isEccChecked                  ///< [IN] whether need to check ecc status in the partition
+    bool isEccChecked,                 ///< [IN] whether need to check ecc status in the partition
+    bool onlyChkValidUbiData           ///< [IN] whether only check valid data or not
 );
 
 //--------------------------------------------------------------------------------------------------

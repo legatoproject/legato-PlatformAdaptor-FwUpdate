@@ -15,6 +15,7 @@
 #include "partition_local.h"
 #include "pa_fwupdate_dualsys.h"
 #include "pa_flash.h"
+#include "flash-ubi.h"
 
 //--------------------------------------------------------------------------------------------------
 /**
@@ -727,6 +728,54 @@ le_result_t partition_CheckIfUbiAndGetUbiVolumes
 
 //--------------------------------------------------------------------------------------------------
 /**
+ * Get an UBI partition's block valid data length
+ *
+ * @return
+ *      - LE_OK       on success
+ *      - LE_FAULT    on failure
+ */
+//--------------------------------------------------------------------------------------------------
+le_result_t partition_GetUbiBlockValidDataLen
+(
+    uint32_t* dataLenPtr,                ///< [OUT] valid data length
+    int pgSize,                          ///< [IN] page size
+    uint8_t* flashBlockPtr               ///< [IN] flash data pointer
+)
+{
+    int res;
+
+    /* Check the UBI VID magic number, if not exist then not need
+     * to check more buffer, this block should be an empty block.
+     * The empty block in UBI are all 0xFF except the first page.
+     */
+    res = pa_flash_CheckUbiMagic(flashBlockPtr + pgSize, UBI_VID_HDR_MAGIC);
+
+    if(LE_BAD_PARAMETER == res)
+    {
+        LE_ERROR("pa_flash_CheckUbiMagic, parameter input not correct.");
+        return res;
+    }
+    else if (LE_NOT_FOUND == res)
+    {
+        *dataLenPtr = pgSize;
+    }
+    else
+    {
+       /* Calculate the real length of the data in read buffer
+        * and then write the real data to the target block.
+        */
+        if (LE_OK != pa_flash_CalculateDataLength(pgSize, flashBlockPtr, dataLenPtr))
+        {
+            LE_ERROR("pa_CalculateDataLength, parameter input not correct.");
+            return LE_FAULT;
+        }
+    }
+
+    return LE_OK;
+}
+
+//--------------------------------------------------------------------------------------------------
+/**
  * Check if data flashed into a partition are correctly written
  *
  * @return
@@ -744,13 +793,15 @@ le_result_t partition_CheckData
     off_t atOffset,                    ///< [IN] Force offset to start from
     uint32_t crc32ToCheck,             ///< [IN] Expected CRC 32
     le_mem_PoolRef_t flashImgPool,     ///< [IN] memory pool
-    bool isEccChecked                  ///< [IN] whether need to check ecc status in the partition
+    bool isEccChecked,                 ///< [IN] whether need to check ecc status in the partition
+    bool onlyChkValidUbiData           ///< [IN] whether only check valid data or not
 )
 {
     pa_flash_Desc_t flashFd = NULL;
     uint8_t* checkBlockPtr = NULL;
 
     size_t size, imageSize = 0;
+    uint32_t chkDataLen = 0;
     off_t offset = atOffset;
     uint32_t crc32 = LE_CRC_START_CRC32;
     pa_flash_Info_t* flashInfoPtr;
@@ -814,7 +865,18 @@ le_result_t partition_CheckData
             }
         }
 
-        crc32 = le_crc_Crc32( checkBlockPtr, size, crc32);
+        chkDataLen = size;
+        if (onlyChkValidUbiData)
+        {
+            if ( LE_OK != partition_GetUbiBlockValidDataLen(&chkDataLen,
+                                                            flashInfoPtr->writeSize,
+                                                            checkBlockPtr))
+            {
+                LE_ERROR("failed to get UBI block valid data length");
+                goto error;
+            }
+        }
+        crc32 = le_crc_Crc32( checkBlockPtr, chkDataLen, crc32);
         offset += size;
         imageSize += size;
     }
@@ -1147,7 +1209,7 @@ le_result_t partition_WriteDataSBL
                                                ? 0
                                                : (flashInfo.nbBlk / 2)) * flashInfo.eraseSize,
                                               hdrPtr->crc32,
-                                              *ctxPtr->flashPoolPtr, true))
+                                              *ctxPtr->flashPoolPtr, true, false))
             {
                 LE_CRIT("SBL flash failed at block %d. Erasing...", sblBaseBlk);
                 for (atBlk = 0; atBlk < (flashInfo.nbBlk / 2); atBlk++)
@@ -1413,7 +1475,7 @@ le_result_t partition_WriteUpdatePartition
             return LE_FAULT;
         }
         ret = partition_CheckData( mtdNum, isLogical, isDual, hdrPtr->imageSize, 0, hdrPtr->crc32,
-                                   *ctxPtr->flashPoolPtr, false);
+                                   *ctxPtr->flashPoolPtr, false, false);
     }
     return ret;
 error:

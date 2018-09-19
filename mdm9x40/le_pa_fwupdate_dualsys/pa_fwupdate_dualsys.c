@@ -1987,10 +1987,12 @@ le_result_t pa_fwupdate_MarkGood
 
         int nbBlk, nbSrcBlkCnt; // Counter to maximum block to be checked
         size_t srcSize;
+        bool onlyChkValidUbiData;
 
         // In case of UBI partition, a second try will be performed if the checksum of active
         // changed during the copy.
         isRetryNeeded = false;
+        onlyChkValidUbiData = isUbiPartition? true:false;
 
         do
         {
@@ -2033,34 +2035,12 @@ le_result_t pa_fwupdate_MarkGood
                 dataLen = flashInfoSrcPtr->eraseSize;
                 if (isUbiPartition)
                 {
-                   /* Check the UBI VID magic number, if not exist then not need
-                    * to check more buffer, this block should be an empty block.
-                    * The empty block in UBI are all 0xFF except the first page.
-                    */
-                    res = pa_flash_CheckUbiMagic(flashBlockPtr + flashInfoSrcPtr->writeSize,
-                                                  UBI_VID_HDR_MAGIC);
-
-                    if(LE_BAD_PARAMETER == res)
+                    if ( LE_OK != partition_GetUbiBlockValidDataLen(&dataLen,
+                                                                    flashInfoSrcPtr->writeSize,
+                                                                    flashBlockPtr))
                     {
-                        LE_ERROR("pa_flash_CheckUbiMagic, parameter input not correct.");
+                        LE_ERROR("failed to get UBI block valid data length");
                         goto error;
-                    }
-                    else if (LE_NOT_FOUND == res)
-                    {
-                        dataLen = flashInfoSrcPtr->writeSize;
-                    }
-                    else
-                    {
-                       /* Calculate the real length of the data in read buffer
-                        * and then write the real data to the target block.
-                        */
-                        if (LE_OK != pa_flash_CalculateDataLength(flashInfoSrcPtr->writeSize,
-                                                                  flashBlockPtr,
-                                                                  &dataLen))
-                        {
-                            LE_ERROR("pa_CalculateDataLength, parameter input not correct.");
-                            goto error;
-                        }
                     }
                 }
 
@@ -2080,11 +2060,11 @@ le_result_t pa_fwupdate_MarkGood
                 }
                 else
                 {
-                   /* Here calculate the CRC with erase block by erase block, and later will also check
-                    * CRC agian with erase block by erase block, not only real data, all other data
-                    * behind the real data is 0xFF.
+                   /* Here calculate the CRC with erase block by erase block, and later
+                    * also check CRC again with real data length by real data length.
+                    * Skip all data set to 0xFF at the end of erase block.
                     */
-                    crc32Src = le_crc_Crc32(flashBlockPtr, flashInfoSrcPtr->eraseSize, crc32Src);
+                    crc32Src = le_crc_Crc32(flashBlockPtr, dataLen, crc32Src);
                     nbSrcBlkCnt ++;
                 }
             }
@@ -2106,7 +2086,7 @@ le_result_t pa_fwupdate_MarkGood
                 // In this case, we need to recompute the checksum of the MTD to ensure that it is
                 // conform to what we read first.
                 res = partition_CheckData(mtdSrc, isLogicalSrc, isDualSrc, srcSize, 0,
-                                                 crc32Src, FlashImgPool, true);
+                                                 crc32Src, FlashImgPool, true, onlyChkValidUbiData);
                 if (LE_OK != res)
                 {
                     // If first try fails, redo another attempt
@@ -2159,7 +2139,7 @@ le_result_t pa_fwupdate_MarkGood
 
         // Verify the checksum of the destination MTD to ensure it matches the source checksum
         if (LE_OK != partition_CheckData(mtdDst, isLogicalDst, isDualDst, srcSize, 0, crc32Src,
-                                         FlashImgPool, false))
+                                         FlashImgPool, false, onlyChkValidUbiData))
         {
             goto error;
         }
