@@ -405,4 +405,3 @@ le_result_t pa_patch_WriteSegment
     }
     return LE_OK;
 }
-

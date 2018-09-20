@@ -110,8 +110,9 @@ LE_SHARED le_result_t pa_flash_GetUbiTypeAndName
 (
     pa_flash_Desc_t desc,         ///< [IN] Private flash descriptor
     uint32_t*       volTypePtr,   ///< [OUT] Type of the volume
-    char            volName[PA_FLASH_UBI_MAX_VOLUMES]
+    char            volName[PA_FLASH_UBI_MAX_VOLUMES],
                                   ///< [OUT] Name of the volume
+    uint32_t*       volFlagsPtr   ///< [OUT] Flags set to the volume
 );
 
 //--------------------------------------------------------------------------------------------------
@@ -175,6 +176,29 @@ LE_SHARED le_result_t pa_flash_CreateUbiAtOffset
     off_t           offset,         ///< [IN] Base offset for the UBI
     bool            isForcedCreate  ///< [IN] If set to true the UBI partition is overwriten and the
                                     ///<      previous content is lost
+);
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Create UBI volume
+ *
+ * @return
+ *      - LE_OK            On success
+ *      - LE_BAD_PARAMETER If desc is NULL or is not a valid descriptor
+ *      - LE_FORMAT_ERROR  If the flash is not in UBI format
+ *      - LE_DUPLICATE     If the volume name or volume ID already exists
+ *      - LE_IO_ERROR      If a flash IO error occurs
+ *      - LE_NO_MEMORY     If a volume requires more PEBs than the partition size
+ */
+//--------------------------------------------------------------------------------------------------
+LE_SHARED le_result_t pa_flash_CreateUbiVolumeWithFlags
+(
+    pa_flash_Desc_t desc,      ///< [IN] Private flash descriptor
+    uint32_t ubiVolId,         ///< [IN] UBI volume ID
+    const char* ubiVolNamePtr, ///< [IN] UBI volume name
+    uint32_t ubiVolType,       ///< [IN] UBI volume type: dynamic or static
+    uint32_t ubiVolSize,       ///< [IN] UBI volume size (for dynamic volumes only)
+    uint32_t ubiVolFlags       ///< [IN] UBI volume flags (for dynamic volumes only)
 );
 
 //--------------------------------------------------------------------------------------------------

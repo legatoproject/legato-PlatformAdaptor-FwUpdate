@@ -320,6 +320,7 @@ le_result_t partition_OpenUbiVolumeSwifotaPartition
     uint32_t ubiVolId,                ///< [IN] UBI volume ID
     uint32_t ubiVolType,              ///< [IN] UBI volume type
     uint32_t ubiVolSize,              ///< [IN] UBI volume size
+    uint32_t ubiVolFlags,             ///< [IN] UBI volume flags
     char* ubiVolName,                 ///< [IN] UBI volume name
     bool createVol                    ///< [IN] true if volume needs to be created
 );

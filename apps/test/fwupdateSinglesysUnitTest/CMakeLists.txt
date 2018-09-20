@@ -39,6 +39,10 @@ if ($ENV{TARGET} MATCHES "localhost")
     file(COPY ls.cwe DESTINATION ${EXECUTABLE_OUTPUT_PATH}/../data)
     file(COPY ls2cp.cwe DESTINATION ${EXECUTABLE_OUTPUT_PATH}/../data)
     file(COPY cp2ls.cwe DESTINATION ${EXECUTABLE_OUTPUT_PATH}/../data)
+    file(COPY cp_ubi.cwe DESTINATION ${EXECUTABLE_OUTPUT_PATH}/../data)
+    file(COPY ls_ubi.cwe DESTINATION ${EXECUTABLE_OUTPUT_PATH}/../data)
+    file(COPY ls2cp_ubi.cwe DESTINATION ${EXECUTABLE_OUTPUT_PATH}/../data)
+    file(COPY cp2ls_ubi.cwe DESTINATION ${EXECUTABLE_OUTPUT_PATH}/../data)
     add_test(${TEST_EXEC} ${EXECUTABLE_OUTPUT_PATH}/${TEST_EXEC})
 
     # This is a C test

@@ -104,6 +104,20 @@ Metadata_t;
 
 //--------------------------------------------------------------------------------------------------
 /**
+ * Data structure to track meta image data
+ */
+//--------------------------------------------------------------------------------------------------
+typedef struct
+{
+    uint8_t metaCweHdrRaw[CWE_HDRPSBLEN+1][CWE_HEADER_SIZE];   ///< Array to store cwe headers in
+                                                               ///< meta image
+    uint8_t currentIndex;                                      ///< Index of current cwe header in
+                                                               ///< meta
+}
+MetaImgData_t;
+
+//--------------------------------------------------------------------------------------------------
+/**
  * Resume context to save
  */
 //--------------------------------------------------------------------------------------------------
@@ -127,9 +141,13 @@ typedef struct
     ssize_t  inImageLength;         ///< Total size of the package (read from the first CWE header)
     uint8_t  miscOpts;              ///< Misc Options field from CWE header
     bool     isImageToBeRead;       ///< Boolean to know if data concerns header or component image
+
     deltaUpdate_PatchMetaHdr_t patchMetaHdr;    ///< Patch Meta Header
     deltaUpdate_PatchHdr_t     patchHdr;        ///< Patch Header
+    applyPatch_Ctx_t   imgdiffCtx;  ///< Imgdiff contxt
+    MetaImgData_t metaImgData;      ///< Meta image data
     Metadata_t metaData;            ///< Meta data of the current package
+
     uint32_t ctxCrc;                ///< Context CRC, Computed on all previous fields of this struct
 }
 ResumeCtxSave_t;
@@ -163,7 +181,6 @@ static le_mem_PoolRef_t   ChunkPool;
  */
 //--------------------------------------------------------------------------------------------------
 static cwe_Header_t CurrentCweHeader;
-static bool CurrentIsDelta = false;
 
 //--------------------------------------------------------------------------------------------------
 /**
@@ -217,6 +234,7 @@ static deltaUpdate_Ctx_t DeltaUpdateCtx = {
     .cweHdrPtr   = &CurrentCweHeader,
     .hdrPtr      = &ResumeCtx.saveCtx.patchHdr,
     .metaHdrPtr  = &ResumeCtx.saveCtx.patchMetaHdr,
+    .imgCtxPtr   = &ResumeCtx.saveCtx.imgdiffCtx,
     .poolPtr     = &FlashImgPool,
     .patchRemLen = 0
 };
@@ -526,7 +544,7 @@ static le_result_t GetResumeCtx
 
 //--------------------------------------------------------------------------------------------------
 /**
- * Write data in a partition
+ * Write data in a partition. In case of delta, apply the patch.
  *
  * @return
  *      - LE_OK on success
@@ -559,10 +577,28 @@ static le_result_t WriteData
     // Delta patch
     if (hdrPtr->miscOpts & CWE_MISC_OPTS_DELTAPATCH)
     {
-        LE_INFO( "Applying delta patch to %u\n", hdrPtr->imageType );
-        ret = deltaUpdate_ApplyPatch(&DeltaUpdateCtx, lengthPtr ? *lengthPtr : 0,
-                                     offset, dataPtr, &PartitionCtx, lengthPtr, wrLenPtr,
-                                     forceClose, isFlashedPtr);
+        deltaUpdate_PatchMetaHdr_t* hdpPtr = DeltaUpdateCtx.metaHdrPtr;
+        if (0 == memcmp(hdpPtr->diffType, BSDIFF_MAGIC, strlen(BSDIFF_MAGIC)))
+        {
+            LE_INFO( "Applying delta patch to %u\n", hdrPtr->imageType );
+            ret = deltaUpdate_ApplyPatch(&DeltaUpdateCtx, lengthPtr ? *lengthPtr : 0,
+                                          offset, dataPtr, &PartitionCtx, lengthPtr, wrLenPtr,
+                                          forceClose, isFlashedPtr);
+        }
+        else if ((0 == memcmp(hdpPtr->diffType, IMGDIFF_MAGIC, strlen(IMGDIFF_MAGIC))) ||
+                 (0 == memcmp(hdpPtr->diffType, NODIFF_MAGIC, strlen(NODIFF_MAGIC))))
+        {
+            LE_INFO( "Applying delta patch to UBI partition. ImageType: %u\n", hdrPtr->imageType );
+            ret = deltaUpdate_ApplyUbiImgPatch(&DeltaUpdateCtx, lengthPtr ? *lengthPtr : 0,
+                                               offset, dataPtr, &PartitionCtx, lengthPtr, wrLenPtr,
+                                               forceClose, isFlashedPtr);
+        }
+        else
+        {
+            LE_ERROR("Bad diff type: %s", hdpPtr->diffType);
+            ret = LE_FAULT;
+        }
+
     }
     else
     {
@@ -708,6 +744,93 @@ static void StoreCurrentPosition
     }
 }
 
+//--------------------------------------------------------------------------------------------------
+/**
+ * This function processes and stores the meta image data
+ *
+ * @return
+ *      - LE_OK on success
+ *      - LE_FAULT on failure
+ */
+//--------------------------------------------------------------------------------------------------
+static le_result_t ProcessMetaImgData
+(
+    const uint8_t* chunkPtr,    ///< [IN] Input data chunk
+    uint32_t length,            ///< [IN] Length of data chunk
+    ResumeCtx_t* resumeCtxPtr   ///< [INOUT] resume context
+)
+{
+
+     ResumeCtxSave_t *saveCtxPtr = &(resumeCtxPtr->saveCtx);
+    // Meta contains original cwe headers of delta subimages, so store them
+
+    // Length must be integer multiple of CWE HEADER length
+    if ((length % CWE_HEADER_SIZE) != 0)
+    {
+        LE_ERROR("Wrong meta data. Meta size: %u", length);
+        return LE_FAULT;
+    }
+
+    // Throw away old meta data store the current meta data
+    int cweHeaderNo = length / CWE_HEADER_SIZE;
+
+    LE_INFO("DBUG: Number of cwe headers in meta: %d", cweHeaderNo);
+
+    if (cweHeaderNo > (CWE_HDRPSBLEN+1))
+    {
+        LE_ERROR("Too many cwe headers (%d) in meta", cweHeaderNo);
+        return LE_FAULT;
+    }
+
+    // Throw away old meta, so reset everything to zero and save the current one.
+    memset(&(saveCtxPtr->metaImgData), 0, sizeof(saveCtxPtr->metaImgData));
+    memcpy(saveCtxPtr->metaImgData.metaCweHdrRaw, chunkPtr, length);
+
+    // Parsing complete, update and store context
+    CurrentGlobalCrc32 = le_crc_Crc32((uint8_t*)chunkPtr,
+                                       length,
+                                       CurrentGlobalCrc32);
+
+    CurrentImageCrc32 = le_crc_Crc32((uint8_t*)chunkPtr,
+                                     length,
+                                     CurrentImageCrc32);
+
+    LE_INFO("Image data write: CRC in header: 0x%x, calculated CRC 0x%x",
+             resumeCtxPtr->saveCtx.imageCrc, CurrentImageCrc32);
+
+    CurrentInImageOffset += length;
+    LenToFlash += length;
+    // Don't update CurrentOutImageOffset as it nothing written in flash. Here we are storing
+    // Image Meta data only.
+    StoreCurrentPosition(resumeCtxPtr);
+
+    // Meta image is very small, all data must be read at one shot. If not, then this should be
+    // an error
+    if (CurrentInImageOffset == CurrentCweHeader.imageSize)
+    {
+        LE_DEBUG("Image data write end: CRC in header: 0x%x, calculated CRC 0x%x",
+               CurrentCweHeader.crc32, CurrentImageCrc32 );
+
+        /* The whole meta data was written: compare CRC */
+        if (CurrentCweHeader.crc32  != CurrentImageCrc32)
+        {
+          /* Error on CRC check */
+          LE_ERROR ("Error on CRC check");
+          return LE_FAULT;
+        }
+
+        LE_DEBUG ("CurrentInImageOffset %zu, CurrentImage %d",
+                CurrentInImageOffset, CurrentCweHeader.imageType);
+        resumeCtxPtr->saveCtx.isImageToBeRead = false;
+    }
+    else
+    {
+        LE_ERROR("Meta image wasn't read fully");
+        return LE_FAULT;
+    }
+
+    return LE_OK;
+}
 
 //--------------------------------------------------------------------------------------------------
 /**
@@ -789,14 +912,83 @@ static size_t WriteCweHeader
 
 //--------------------------------------------------------------------------------------------------
 /**
+ * This function writes META image data (mainly the cwe headers) in corresponding flash partition.
+ * It only writes one cwe header at a time.
+ *
+ * @return
+ *      - LE_OK on Success
+ *      - LE_FAULT on failure
+ */
+//--------------------------------------------------------------------------------------------------
+static le_result_t WriteMetaImageData
+(
+    ResumeCtx_t* resumeCtxPtr   ///< [INOUT] resume context
+)
+{
+    bool isFlashed = false;
+    size_t writtenLength = 0;
+    size_t length = CWE_HEADER_SIZE;
+    size_t tmpLength = length;
+    ResumeCtxSave_t *saveCtxPtr = &resumeCtxPtr->saveCtx;
+
+    if (0 == CurrentOutImageOffset)
+    {
+        if (LE_OK != partition_OpenSwifotaPartition(&PartitionCtx, CurrentOutImageOffset))
+        {
+            LE_ERROR("Failed to open SWIFOTA partition for update");
+            return 0;
+        }
+    }
+
+    int currentCweIndex = saveCtxPtr->metaImgData.currentIndex;
+    uint8_t *dataPtr = saveCtxPtr->metaImgData.metaCweHdrRaw[currentCweIndex];
+
+    LE_INFO("Meta Image Index to write SWIFOTA : %d", currentCweIndex);
+    // Data must be always non zero, so don't do-while loop
+    while (writtenLength < length)
+    {
+        tmpLength = length - writtenLength;
+        if (LE_OK != partition_WriteSwifotaPartition(&PartitionCtx,
+                                              &tmpLength,
+                                              CurrentOutImageOffset,
+                                              dataPtr+writtenLength,
+                                              false, &isFlashed))
+        {
+
+            // Error on storing image data
+            LE_ERROR ("Error cwe header from meta image data");
+            return LE_FAULT;
+        }
+        else
+        {
+            LE_INFO("isFlashed: %d", isFlashed);
+            CurrentOutImageOffset += tmpLength;
+            writtenLength += tmpLength;
+        }
+    }
+    LE_INFO("isFlashed: %d", isFlashed);
+    // Increase index in metadata
+    saveCtxPtr->metaImgData.currentIndex += 1;
+    if (isFlashed)
+    {
+        StoreCurrentPosition(resumeCtxPtr);
+    }
+
+    LE_INFO("currentCweIndex: %d", saveCtxPtr->metaImgData.currentIndex);
+    return LE_OK;
+}
+
+
+//--------------------------------------------------------------------------------------------------
+/**
  * This function writes image data in corresponding flash partition
  *
  * @return
- *      - Written data length
- *      - 0 in case of failure
+ *      - LE_OK on success
+ *      - LE_FAULT in case of failure
  */
 //--------------------------------------------------------------------------------------------------
-static size_t WriteImageData
+static le_result_t WriteImageData
 (
     cwe_Header_t* cweHeaderPtr, ///< [INOUT] CWE header linked to image data
     const uint8_t* chunkPtr,    ///< [IN]Data to be written in flash partition
@@ -815,10 +1007,13 @@ static size_t WriteImageData
         if (LE_OK != partition_OpenSwifotaPartition(&PartitionCtx, CurrentOutImageOffset))
         {
             LE_ERROR("Failed to open SWIFOTA partition for update");
-            return 0;
+            return LE_FAULT;
         }
     }
-    while (writtenLength < length)
+
+    // Some of imgdiff patch length can be zero (no body), they have only meta data. That's why
+    // put do-while loop, instead of while loop
+    do
     {
         tmpLength = length - writtenLength;
 
@@ -830,6 +1025,8 @@ static size_t WriteImageData
                                false,
                                &isFlashed))
         {
+            LE_INFO("chunk length: %zd", length);
+
             CurrentGlobalCrc32 = le_crc_Crc32((uint8_t*)chunkPtr + writtenLength,
                                               tmpLength,
                                               CurrentGlobalCrc32);
@@ -856,18 +1053,23 @@ static size_t WriteImageData
 
                 StoreCurrentPosition(resumeCtxPtr);
             }
+            LE_INFO("CurrentInImgOffset: %zu CurrentImageSize: %"PRIu32
+                    " CurrentOutImageOffset: %zu, wrLen: %zu",
+                    CurrentInImageOffset, CurrentCweHeader.imageSize,
+                    CurrentOutImageOffset, *wrLenPtr);
         }
         else
         {
             // Error on storing image data
             LE_ERROR ("Error when writing image data in partition");
-            return 0;
+            return LE_FAULT;
         }
     }
+    while (writtenLength < length);
 
     if (CurrentInImageOffset == CurrentCweHeader.imageSize)
     {
-        LE_DEBUG("Image data write end: CRC in header: 0x%x, calculated CRC 0x%x",
+        LE_INFO("Image data write end: CRC in header: 0x%x, calculated CRC 0x%x",
                  cweHeaderPtr->crc32, CurrentImageCrc32 );
 
         /* The whole image was written: compare CRC */
@@ -875,9 +1077,49 @@ static size_t WriteImageData
         {
             /* Error on CRC check */
             LE_ERROR ("Error on CRC check");
-            return 0;
+            return LE_FAULT;
         }
+        if ((cweHeaderPtr->miscOpts & CWE_MISC_OPTS_DELTAPATCH) && // && UBI partition
+                deltaUpdate_IsImgPatch(cweHeaderPtr->imageType))
+        {
+            cwe_Header_t closeUbiCweHdr;
+            int metaIndex = saveCtxPtr->metaImgData.currentIndex;
+            LE_INFO("Meta index: %d", metaIndex);
+            if ( LE_OK != cwe_LoadHeader(
+                            saveCtxPtr->metaImgData.metaCweHdrRaw[metaIndex - 1], &closeUbiCweHdr))
+            {
+                LE_ERROR("Failed to load cwe header from meta image");
+                return LE_FAULT;
+            }
 
+            uint32_t ubiImgSize = 0;
+            uint32_t ubiImgCrc32 = 0;
+
+            le_result_t result = partition_ComputeUbiCrc32SwifotaPartition(
+                                                    &PartitionCtx, &ubiImgSize, &ubiImgCrc32);
+            if (LE_OK != result)
+            {
+                LE_ERROR("Failed to compute UBI partition crc32 in SWIFOTA, result; %d", result);
+                return LE_FAULT;
+            }
+
+            if ((ubiImgSize != closeUbiCweHdr.imageSize) || (ubiImgCrc32 != closeUbiCweHdr.crc32))
+            {
+                LE_ERROR("Constructed ubiImage mismatch. OrigSize: %u, OrigCrc32: %08x, "
+                         "Computed size: %u, Computed Crc32: %08x",
+                         closeUbiCweHdr.imageSize, closeUbiCweHdr.crc32,
+                         ubiImgSize, ubiImgCrc32);
+                return LE_FAULT;
+            }
+
+            LE_INFO("Closing ubi swifota partition");
+            if (LE_OK != partition_CloseUbiSwifotaPartition(&PartitionCtx, false, NULL))
+            {
+                /* Error on closing ubi */
+                LE_ERROR ("Error on ubi close");
+                return LE_FAULT;
+            }
+        }
         // Erase the path flag in options to allow new cwe header to be read
         cweHeaderPtr->miscOpts &= (uint8_t)~((uint8_t)CWE_MISC_OPTS_DELTAPATCH);
         LE_DEBUG ("CurrentInImageOffset %zu, CurrentImage %d",
@@ -885,7 +1127,7 @@ static size_t WriteImageData
         resumeCtxPtr->saveCtx.isImageToBeRead = false;
     }
 
-    return writtenLength;
+    return LE_OK;
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -917,12 +1159,7 @@ static le_result_t ParseCweHeader
              CurrentCweHeader.crc32, CurrentCweHeader.miscOpts);
     if (CurrentCweHeader.miscOpts & CWE_MISC_OPTS_DELTAPATCH)
     {
-        CurrentIsDelta = true;
         saveCtxPtr->isImageToBeRead = false;
-    }
-    else
-    {
-        CurrentIsDelta = false;
     }
     if (-1 == saveCtxPtr->fullImageLength)
     {
@@ -937,8 +1174,6 @@ static le_result_t ParseCweHeader
             saveCtxPtr->globalCrc = CurrentCweHeader.crc32;
             saveCtxPtr->currentGlobalCrc = LE_CRC_START_CRC32;
             PartitionCtx.fullImageSize = saveCtxPtr->fullImageLength;
-            LE_DEBUG("New CWE: fullImageLength = %zd, CRC=0x%08" PRIx32, saveCtxPtr->fullImageLength,
-                     saveCtxPtr->globalCrc);
             LE_INFO("TOP CWE header: fullImageLength = %zd, CRC=0x%08" PRIx32,
                     saveCtxPtr->fullImageLength, saveCtxPtr->globalCrc);
 
@@ -986,18 +1221,36 @@ static le_result_t ParseCweHeader
         saveCtxPtr->currentImageCrc = LE_CRC_START_CRC32;
         saveCtxPtr->currentInImageOffset = 0;
     }
-    else
-    {
-        LE_INFO("Clearing DELTAPATCH options in CWE header for %u", CurrentCweHeader.imageType);
-        CurrentCweHeader.miscOpts &= ~(CWE_MISC_OPTS_DELTAPATCH);
-    }
 
     return LE_OK;
 }
 
 //--------------------------------------------------------------------------------------------------
 /**
- * Parse patch headers
+ * Update context after read patch meta data
+ */
+//--------------------------------------------------------------------------------------------------
+static void UpdateCtxOnMetaRead
+(
+    size_t length,              ///< [IN] Input data length
+    const uint8_t* chunkPtr,    ///< [IN] input data
+    ResumeCtx_t *resumeCtxPtr   ///< [OUT] resume context
+)
+{
+    ResumeCtxSave_t *saveCtxPtr = &(resumeCtxPtr->saveCtx);
+    CurrentInImageOffset += length;
+    saveCtxPtr->currentInImageOffset = CurrentInImageOffset;
+    CurrentImageCrc32 = le_crc_Crc32((uint8_t*)chunkPtr, length, CurrentImageCrc32);
+    saveCtxPtr->currentImageCrc = CurrentImageCrc32;
+    CurrentGlobalCrc32 = le_crc_Crc32((uint8_t*)chunkPtr, length, CurrentGlobalCrc32);
+    saveCtxPtr->currentGlobalCrc = CurrentGlobalCrc32;
+    LE_DEBUG ( "patch header: CRC in header: 0x%x, calculated CRC 0x%x",
+               CurrentCweHeader.crc32, CurrentImageCrc32 );
+}
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Parse patch meta headers
  *
  * @return
  *      - LE_OK            On success
@@ -1005,7 +1258,93 @@ static le_result_t ParseCweHeader
  *      - LE_FAULT         On failure
  */
 //--------------------------------------------------------------------------------------------------
-static le_result_t ParsePatchHeaders
+static le_result_t ParsePatchMetaHeaders
+(
+    size_t length,              ///< [IN] Input data length
+    const uint8_t* chunkPtr,    ///< [IN] input data
+    ResumeCtx_t *resumeCtxPtr   ///< [OUT] resume context
+)
+{
+    if ((NULL == chunkPtr) || (NULL == resumeCtxPtr) || (PATCH_META_HEADER_SIZE != length))
+    {
+        LE_ERROR("Bad parameter");
+        return LE_BAD_PARAMETER;
+    }
+
+    le_result_t res = deltaUpdate_LoadPatchMetaHeader(chunkPtr,
+                                                      &(resumeCtxPtr->saveCtx.patchMetaHdr));
+    if (LE_OK != res)
+    {
+        LE_ERROR ("Error in parsing the Patch Meta header");
+        return LE_FAULT;
+    }
+
+    LE_DEBUG ("Patch Meta read ok");
+
+    UpdateCtxOnMetaRead(length, chunkPtr, resumeCtxPtr);
+
+    // If no diff, then do only copy. This is true for small ubi volume(i.e. dm-verity hash etc)
+    if (0 == memcmp(resumeCtxPtr->saveCtx.patchMetaHdr.diffType, NODIFF_MAGIC, strlen(NODIFF_MAGIC)))
+    {
+        resumeCtxPtr->saveCtx.isImageToBeRead = true;
+        DeltaUpdateCtx.patchRemLen = resumeCtxPtr->saveCtx.patchMetaHdr.destSize;
+    }
+
+    return LE_OK;
+}
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Parse bsdiff patch headers
+ *
+ * @return
+ *      - LE_OK            On success
+ *      - LE_BAD_PARAMETER The parameter is invalid
+ *      - LE_FAULT         On failure
+ */
+//--------------------------------------------------------------------------------------------------
+static le_result_t ParseBsdiffPatchHeaders
+(
+    size_t length,              ///< [IN] Input data length
+    const uint8_t* chunkPtr,    ///< [IN] input data
+    ResumeCtx_t *resumeCtxPtr   ///< [OUT] resume context
+)
+{
+    if ((NULL == chunkPtr) || (NULL == resumeCtxPtr) || (PATCH_HEADER_SIZE != length))
+    {
+        LE_ERROR("Bad parameter");
+        return LE_BAD_PARAMETER;
+    }
+
+    le_result_t res = deltaUpdate_LoadPatchHeader(chunkPtr, &DeltaUpdateCtx);
+    if (LE_OK != res)
+    {
+        LE_ERROR ("Error in parsing the Patch header");
+        return LE_FAULT;
+    }
+
+    LE_DEBUG ("BSDIFF Patch header read ok");
+
+    UpdateCtxOnMetaRead(length, chunkPtr, resumeCtxPtr);
+
+    // Next data will concern a component image
+    resumeCtxPtr->saveCtx.isImageToBeRead = true;
+    DeltaUpdateCtx.patchRemLen = resumeCtxPtr->saveCtx.patchHdr.size;
+
+    return LE_OK;
+}
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Parse imgdiff patch headers
+ *
+ * @return
+ *      - LE_OK            On success
+ *      - LE_BAD_PARAMETER The parameter is invalid
+ *      - LE_FAULT         On failure
+ */
+//--------------------------------------------------------------------------------------------------
+static le_result_t ParseImgdiffPatchHeaders
 (
     size_t length,              ///< [IN] Input data length
     const uint8_t* chunkPtr,    ///< [IN] input data
@@ -1018,33 +1357,74 @@ static le_result_t ParsePatchHeaders
         return LE_BAD_PARAMETER;
     }
 
-    le_result_t res = (PATCH_META_HEADER_SIZE == length) ?
-        deltaUpdate_LoadPatchMetaHeader(chunkPtr, &resumeCtxPtr->saveCtx.patchMetaHdr) :
-        deltaUpdate_LoadPatchHeader(chunkPtr, &DeltaUpdateCtx);
+    bool shouldLoad = false;
+    le_result_t res = applyPatch_ShouldLoadContext(&(resumeCtxPtr->saveCtx.imgdiffCtx),
+                                     &shouldLoad);
     if (LE_OK != res)
     {
-        LE_ERROR ("Error in parsing the Patch Meta or Patch header");
+        LE_ERROR ("Error in parsing the Imgdiff Patch Meta or Patch header");
         return LE_FAULT;
     }
 
-    LE_DEBUG ("Patch Meta or Patch header read ok");
-
-    ResumeCtxSave_t *saveCtxPtr = &(resumeCtxPtr->saveCtx);
-    CurrentInImageOffset += length;
-    saveCtxPtr->currentInImageOffset = CurrentInImageOffset;
-    CurrentImageCrc32 = le_crc_Crc32((uint8_t*)chunkPtr, length, CurrentImageCrc32);
-    saveCtxPtr->currentImageCrc = CurrentImageCrc32;
-    CurrentGlobalCrc32 = le_crc_Crc32((uint8_t*)chunkPtr, length, CurrentGlobalCrc32);
-    saveCtxPtr->currentGlobalCrc = CurrentGlobalCrc32;
-    LE_DEBUG ( "patch header: CRC in header: 0x%x, calculated CRC 0x%x",
-               CurrentCweHeader.crc32, CurrentImageCrc32 );
-
-    if (PATCH_HEADER_SIZE == length)
+    if (shouldLoad)
     {
-        // Next data will concern a component image
-        resumeCtxPtr->saveCtx.isImageToBeRead = true;
+        res = applyPatch_LoadPatchContext(chunkPtr,
+                                          length,
+                                          &(resumeCtxPtr->saveCtx.imgdiffCtx));
+        if (LE_OK != res)
+        {
+            LE_ERROR("Failed to load imgdiff patch context");
+            return LE_FAULT;
+        }
+
+        LE_DEBUG("Imgdiff Patch header read ok");
+
+        UpdateCtxOnMetaRead(length, chunkPtr, resumeCtxPtr);
+
+
+        res = applyPatch_ShouldLoadContext(&(resumeCtxPtr->saveCtx.imgdiffCtx),
+                                             &shouldLoad);
+        if ( (false == shouldLoad) && (LE_OK == res))
+        {
+            // Next data will be a component patch data
+             int32_t patch_len = applyPatch_GetPatchLengthToRead(
+                                                  &(resumeCtxPtr->saveCtx.imgdiffCtx),
+                                                  CHUNK_LENGTH,
+                                                  resumeCtxPtr->saveCtx.isImageToBeRead);
+             if (patch_len > 0)
+             {
+                 resumeCtxPtr->saveCtx.isImageToBeRead = true;
+                 DeltaUpdateCtx.patchRemLen = patch_len;
+             }
+             else if (0 == patch_len)
+             {
+                 // TODO: No patch. Imgdiff should internally copy data. So call applyImgdiff
+                 resumeCtxPtr->saveCtx.isImageToBeRead = false;
+                 DeltaUpdateCtx.patchRemLen = patch_len;
+                 size_t writeLen = 0;
+                 if (LE_OK != WriteImageData(&CurrentCweHeader, chunkPtr, 0,
+                                             &writeLen, resumeCtxPtr))
+                 {
+                     LE_ERROR("Failed to apply imgdiff copy command");
+                     return LE_FAULT;
+                 }
+                 LE_INFO("Imgdiff copy command. Data written in flash: %zd", writeLen);
+             }
+             else
+             {
+                 LE_ERROR("Received bad patch_len: %d", patch_len);
+                 return LE_FAULT;
+             }
+
+        }
+        return LE_OK;
     }
-    return LE_OK;
+    else
+    {
+        LE_ERROR("Nothing to load for imgdiff patch header");
+        return LE_FAULT;
+    }
+
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -1075,74 +1455,82 @@ static le_result_t ParseAndStoreData
     if (false == resumeCtxPtr->saveCtx.isImageToBeRead)
     {
         // Full header shall be provided each time
-        switch (length)
+        if (CWE_HEADER_SIZE == length)
         {
-            case CWE_HEADER_SIZE:
-                result = ParseCweHeader(chunkPtr, resumeCtxPtr);
-                break;
-
-            case PATCH_META_HEADER_SIZE:
-            case PATCH_HEADER_SIZE:
-                 result = ParsePatchHeaders(length, chunkPtr, resumeCtxPtr);
-                 break;
-
-            default:
-                LE_ERROR ("Bad length for header %d", (uint32_t)length);
-                result = LE_BAD_PARAMETER;
-                break;
-        }
-        if (LE_OK == result)
-        {
-            if (CurrentIsDelta || CurrentCweHeader.imageType == CWE_IMAGE_TYPE_META)
+            result = ParseCweHeader(chunkPtr, resumeCtxPtr);
+            if (LE_OK != result)
             {
-                // Do nothing
-                return LE_OK;
-            }
-            else if (WriteCweHeader(&CurrentCweHeader, chunkPtr, length, &tmpLen, resumeCtxPtr))
-            {
-                // Write to flash sucess
-                result = LE_OK;
-            }
-            else
-            {
-                // Write to flash failed
-                LE_DEBUG("Write to flash failed");
-                result = LE_FAULT;
+                LE_WARN("Failed to parse a CWE header");
+                return result;
             }
         }
         else
         {
-            LE_WARN("Failed to parse a CWE header");
-        }
-    }
-    else
-    {
-        // Component image is under read: follow it
-        if ((-1 == saveCtxPtr->fullImageLength) &&
-            (CurrentCweHeader.imageType == CWE_IMAGE_TYPE_META))
-        {
-            cwe_Header_t cweHdr;
-
-            if (cwe_LoadHeader(chunkPtr, &cweHdr) != LE_OK)
+            if (PATCH_META_HEADER_SIZE == length)
             {
-                LE_ERROR("Error in parsing the CWE header");
-                return LE_FAULT;
+                return ParsePatchMetaHeaders(length, chunkPtr, resumeCtxPtr);
             }
-            /*
-             * Full length and global CRC of the CWE image is provided inside the
-             * first CWE header
-             */
-            saveCtxPtr->currentGlobalCrc = LE_CRC_START_CRC32;
-            saveCtxPtr->globalCrc = cweHdr.crc32;
-            saveCtxPtr->fullImageLength = cweHdr.imageSize + CWE_HEADER_SIZE;
-            PartitionCtx.fullImageSize = saveCtxPtr->fullImageLength;
-            LE_INFO("META CWE header: fullImageLength = %zd, CRC=0x%08" PRIx32,
-                    saveCtxPtr->fullImageLength, saveCtxPtr->globalCrc);
-
-            // First CWE header. Copy it in MetaData structure
-            memcpy(&saveCtxPtr->metaData.cweHeaderRaw, chunkPtr, CWE_HEADER_SIZE);
+            else
+            {
+                deltaUpdate_PatchMetaHdr_t* hdpPtr= &(resumeCtxPtr->saveCtx.patchMetaHdr);
+                if (0 == memcmp(hdpPtr->diffType, BSDIFF_MAGIC, strlen(BSDIFF_MAGIC)))
+                {
+                     return ParseBsdiffPatchHeaders(length, chunkPtr, resumeCtxPtr);
+                }
+                else if (0 == memcmp(hdpPtr->diffType, IMGDIFF_MAGIC, strlen(IMGDIFF_MAGIC)))
+                {
+                    return ParseImgdiffPatchHeaders(length, chunkPtr, resumeCtxPtr);
+                }
+                else
+                {
+                    LE_ERROR ("Bad patch meta header");
+                    return LE_BAD_PARAMETER;
+                }
+            }
         }
-        if (WriteImageData(&CurrentCweHeader, chunkPtr, length, &tmpLen, resumeCtxPtr))
+
+        if (CurrentCweHeader.imageType == CWE_IMAGE_TYPE_META)
+        {
+            // Do nothing
+            return LE_OK;
+        }
+        else if (CurrentCweHeader.miscOpts & CWE_MISC_OPTS_DELTAPATCH)
+        {
+            if (  (CurrentCweHeader.imageType == CWE_IMAGE_TYPE_APPL)
+               || (CurrentCweHeader.imageType == CWE_IMAGE_TYPE_MODM)
+               || (CurrentCweHeader.imageType == CWE_IMAGE_TYPE_SPKG)
+               || (CurrentCweHeader.imageType == CWE_IMAGE_TYPE_BOOT))
+            {
+                // Do nothing for composite delta image. There should be META image which
+                // will contain its original header, META processing function should take
+                // care of writing that header
+                LE_INFO("Composite image has delta package. ImgType: %u",
+                        CurrentCweHeader.imageType);
+                LE_INFO("Clearing DELTAPATCH options in CWE header for %u",
+                        CurrentCweHeader.imageType);
+                CurrentCweHeader.miscOpts &= ~(CWE_MISC_OPTS_DELTAPATCH);
+                return LE_OK;
+            }
+
+             // This is not a composite image, so write its original cwe header from meta
+             // img data
+             if (LE_OK != WriteMetaImageData(resumeCtxPtr))
+             {
+                 LE_ERROR("Failed to write original cwe header from meta image");
+                 return LE_FAULT;
+             }
+
+             if (deltaUpdate_IsImgPatch(CurrentCweHeader.imageType))
+             {
+
+                 if (LE_OK != partition_OpenUbiSwifotaPartition(&PartitionCtx, true, NULL))
+                 {
+                     LE_ERROR("Failed to create ubi partition inside swifota");
+                     return LE_FAULT;
+                 }
+            }
+        }
+        else if (WriteCweHeader(&CurrentCweHeader, chunkPtr, length, &tmpLen, resumeCtxPtr))
         {
             // Write to flash sucess
             result = LE_OK;
@@ -1150,8 +1538,69 @@ static le_result_t ParseAndStoreData
         else
         {
             // Write to flash failed
-            LE_DEBUG("Parsing failed");
+            LE_ERROR("Write to flash failed");
             result = LE_FAULT;
+        }
+    }
+    else
+    {
+        // Component image is under read: follow it
+        if (CWE_IMAGE_TYPE_META == CurrentCweHeader.imageType)
+        {
+
+            if (LE_OK != ProcessMetaImgData(chunkPtr, length, resumeCtxPtr))
+            {
+                LE_ERROR("Failed to process meta image data");
+                return LE_OK;
+            }
+
+            // Only parse and write the first cwe header, rest will be handled once we incur more
+            // delta packages inside this composite package.
+            cwe_Header_t cweHdr;
+
+            if (cwe_LoadHeader(chunkPtr, &cweHdr) != LE_OK)
+            {
+                LE_ERROR("Error in parsing the CWE header");
+                return LE_FAULT;
+            }
+
+            if (-1 == saveCtxPtr->fullImageLength)
+            {
+                // Copy the first cwe header to meta data. This is required for SBL to program
+                // image properly
+                memset(saveCtxPtr->metaData.cweHeaderRaw, 0,
+                       sizeof(saveCtxPtr->metaData.cweHeaderRaw));
+                memcpy(saveCtxPtr->metaData.cweHeaderRaw,
+                                       chunkPtr,
+                                       CWE_HEADER_SIZE);
+
+                /*
+                 * Full length and global CRC of the CWE image is provided inside the
+                 * first CWE header
+                 */
+                saveCtxPtr->currentGlobalCrc = LE_CRC_START_CRC32;
+                saveCtxPtr->globalCrc = cweHdr.crc32;
+                saveCtxPtr->fullImageLength = cweHdr.imageSize + CWE_HEADER_SIZE;
+                PartitionCtx.fullImageSize = saveCtxPtr->fullImageLength;
+                LE_INFO("META CWE header: fullImageLength = %zd, CRC=0x%08" PRIx32,
+                        saveCtxPtr->fullImageLength, saveCtxPtr->globalCrc);
+            }
+            // Now write only the first cweHeader and store others
+
+            if (LE_OK != WriteMetaImageData(resumeCtxPtr))
+            {
+                LE_ERROR("Writing CWE header from meta data failed");
+                return LE_FAULT;
+            }
+            // Meta data processing passed, no need write it again. Return now
+            return LE_OK;
+        }
+
+        if (LE_OK != WriteImageData(&CurrentCweHeader, chunkPtr, length, &tmpLen, resumeCtxPtr))
+        {
+            // Write to flash failed
+            LE_ERROR("Writing image data failed");
+            return LE_FAULT;
         }
     }
 
@@ -1556,7 +2005,9 @@ static le_result_t BuildMetaData
 
     memset(metaDataPtr, 0x00, sizeof(Metadata_t));
 
-    memcpy(&metaDataPtr->cweHeaderRaw, &saveCtxPtr->metaData.cweHeaderRaw, CWE_HEADER_SIZE);
+    memcpy(metaDataPtr->cweHeaderRaw,
+           saveCtxPtr->metaData.cweHeaderRaw,
+           sizeof(metaDataPtr->cweHeaderRaw));
 
     metaDataPtr->magicBegin    = SLOT_MAGIC_BEG;
     metaDataPtr->version       = 1;
@@ -1774,14 +2225,6 @@ le_result_t pa_fwupdate_Download
                     LE_INFO("End of update: total read %zd, full length expected %zd",
                             totalCount, saveCtxPtr->inImageLength);
                     readCount = 0;
-                    result = partition_CloseSwifotaPartition(&PartitionCtx,
-                                                             saveCtxPtr->fullImageLength,
-                                                             false,
-                                                             NULL);
-                    if (LE_OK != result)
-                    {
-                        LE_ERROR("partition_CloseSwifotaPartition fails: %d", result);
-                    }
                     StoreCurrentPosition(&ResumeCtx);
                 }
             }
@@ -1823,7 +2266,10 @@ le_result_t pa_fwupdate_Download
                     LE_ERROR("Failure while computing global CRC");
                     goto error;
                 }
-                LE_INFO("End of download: globalCrc %08x", globalCrc);
+                LE_INFO("End of download: globalCrc %08x length %u",
+                        globalCrc, (uint32_t)(saveCtxPtr->fullImageLength - CWE_HEADER_SIZE));
+                LE_INFO("Expected CRC %08x OUT image offset %zu",
+                        globalCrc, CurrentOutImageOffset);
 
                 if (saveCtxPtr->globalCrc != globalCrc)
                 {
@@ -1831,6 +2277,18 @@ le_result_t pa_fwupdate_Download
                              saveCtxPtr->globalCrc, globalCrc);
                     goto error;
                 }
+
+                LE_INFO("Closing swifota partiton");
+                result = partition_CloseSwifotaPartition(&PartitionCtx,
+                                                         saveCtxPtr->fullImageLength,
+                                                         false,
+                                                         NULL);
+                if (LE_OK != result)
+                {
+                    LE_ERROR("partition_CloseSwifotaPartition fails: %d", result);
+                    goto error;
+                }
+
             }
 
             // Generate the meta data based on the downloaded package

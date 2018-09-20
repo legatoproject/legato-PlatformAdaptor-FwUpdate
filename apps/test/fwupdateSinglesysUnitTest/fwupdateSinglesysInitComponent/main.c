@@ -8,6 +8,7 @@
 
 #include "legato.h"
 #include "pa_flash.h"
+#include "pa_flash_local.h"
 
 //--------------------------------------------------------------------------------------------------
 /**
@@ -167,8 +168,8 @@ COMPONENT_INIT
 
         uint8_t squashfs[mtdInfoPtr->eraseSize - 2 * mtdInfoPtr->writeSize];
 
-        LE_ASSERT_OK(pa_flash_CreateUbiVolume(desc, 0, ubiVolName, PA_FLASH_VOLUME_STATIC,
-                                              2 *sizeof(squashfs)));
+        LE_ASSERT_OK(pa_flash_CreateUbiVolumeWithFlags(desc, 0, ubiVolName, PA_FLASH_VOLUME_STATIC,
+                                                       2 *sizeof(squashfs), 0));
         LE_ASSERT_OK(pa_flash_ScanUbi(desc, 0));
         memset(squashfs, 0xA0 | iUbi, sizeof(squashfs));
         for( iblk = 0; iblk < 2; iblk++ )

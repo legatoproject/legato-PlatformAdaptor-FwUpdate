@@ -13,6 +13,23 @@
 #include "legato.h"
 #include "cwe_local.h"
 #include "partition_local.h"
+#include "applyPatch.h"
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Delta patch DIFF magic signature
+ */
+//--------------------------------------------------------------------------------------------------
+#define BSDIFF_MAGIC   "BSDIFF40\0\0\0\0\0\0\0\0"
+#define IMGDIFF_MAGIC  "IMGDIFF2\0\0\0\0\0\0\0\0"
+
+//--------------------------------------------------------------------------------------------------
+/**
+ *  For the following flag delta is performed, only copy should be done. This is done for small
+ *  ubi volumes < 1 MiB
+ */
+//--------------------------------------------------------------------------------------------------
+#define NODIFF_MAGIC   "NODIFF00\0\0\0\0\0\0\0\0"
 
 //--------------------------------------------------------------------------------------------------
 /**
@@ -25,7 +42,9 @@ typedef struct
     uint8_t  diffType[16];    ///< Patch diff magic signature
     uint32_t segmentSize;     ///< Segment size for every slices. May be device dependant
     uint32_t numPatches;      ///< Number of patch slices
-    uint32_t ubiVolId;        ///< UBI Vol Id. Set to -1 if not used.
+    uint16_t ubiVolId;        ///< UBI Vol Id. Set to -1 if not used.
+    uint8_t  ubiVolType;      ///< UBI Vol type. Set to -1 if not used.
+    uint8_t  ubiVolFlags;     ///< UBI Vol flags. Set to -1 if not used.
     uint32_t origSize;        ///< Size of the original image
     uint32_t origCrc32;       ///< CRC32 of the original image
     uint32_t destSize;        ///< Size of the destination image (after patch is applied)
@@ -58,9 +77,10 @@ deltaUpdate_PatchHdr_t;
 //--------------------------------------------------------------------------------------------------
 typedef struct
 {
-    const cwe_Header_t *cweHdrPtr;          ///< Component image header
-    deltaUpdate_PatchHdr_t *hdrPtr;         ///< Patch header
-    deltaUpdate_PatchMetaHdr_t *metaHdrPtr; ///< Patch meta header
+    const cwe_Header_t* cweHdrPtr;          ///< Component image header
+    deltaUpdate_PatchHdr_t* hdrPtr;         ///< Patch header
+    deltaUpdate_PatchMetaHdr_t* metaHdrPtr; ///< Patch meta header
+    applyPatch_Ctx_t*  imgCtxPtr;           ///< ApplyPatch (Imgdiff) context
     size_t patchRemLen;                     ///< Expected remaining length of the patch when a patch
                                             ///< is crossing a chunk
     le_mem_PoolRef_t *poolPtr;              ///< Memory pool to use
@@ -101,13 +121,13 @@ le_result_t deltaUpdate_LoadPatchHeader
 
 //--------------------------------------------------------------------------------------------------
 /**
- * Apply patch to a partition
+ * Apply bspatch to a partition
  *
  * @return
  *      - LE_OK            on success
  *      - LE_FAULT         on failure
  *      - LE_NOT_PERMITTED if the patch is applied to the SBL
- *      - others           depending of the UBI or flash functions return
+ *      - others           depending on the flash functions return
  */
 //--------------------------------------------------------------------------------------------------
 le_result_t deltaUpdate_ApplyPatch
@@ -116,9 +136,49 @@ le_result_t deltaUpdate_ApplyPatch
     size_t length,                      ///< [IN] Input data length
     size_t offset,                      ///< [IN] Data offset in the package
     const uint8_t* dataPtr,             ///< [IN] input data
-    partition_Ctx_t* partitionCtxPtr,   ///< [IN] Partition context
-    size_t* lengthPtr,                  ///< [IN][OUT] Length to be read/written
-    size_t* wrLenPtr,                   ///< [OUT] Length really written
+    partition_Ctx_t* partitionCtxPtr,   ///< [IN] Context of the source partition
+    size_t* lengthPtr,                  ///< [IN][OUT] Length to write and length writen
+    size_t* wrLenPtr,                   ///< [OUT] Length really written to flash
+    bool forceClose,                    ///< [IN] Force close of device and resources
+    bool *isFlashedPtr                  ///< [OUT] true if flash write was done
+);
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * This function is used by the Legato SW Update component to check whether current one is imgpatch
+ * or not
+ *
+ * @return
+ *      - True            If it is img patch
+ *      - False           Otherwise
+ */
+//--------------------------------------------------------------------------------------------------
+bool deltaUpdate_IsImgPatch
+(
+    uint32_t hdrType             ///< [IN] cwe Header type
+);
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Apply imgpatch to a partition. This must be applied to UBI partition, caller should confirm that
+ * it is applying patch to ubi partition.
+ *
+ * @return
+ *      - LE_OK            on success
+ *      - LE_FAULT         on failure
+ *      - LE_NOT_PERMITTED if the patch is applied to the SBL
+ *      - others           depending of the UBI or flash functions return
+ */
+//--------------------------------------------------------------------------------------------------
+le_result_t deltaUpdate_ApplyUbiImgPatch
+(
+    deltaUpdate_Ctx_t *ctxPtr,          ///< [IN] Delta update context
+    size_t length,                      ///< [IN] Input data length
+    size_t offset,                      ///< [IN] Data offset in the package
+    const uint8_t* dataPtr,             ///< [IN] input data
+    partition_Ctx_t* partitionCtxPtr,   ///< [IN] Context of the source partition
+    size_t* lengthPtr,                  ///< [IN][OUT] Length to write and length writen
+    size_t* wrLenPtr,                   ///< [OUT] Length really written to flash
     bool forceClose,                    ///< [IN] Force close of device and resources
     bool *isFlashedPtr                  ///< [OUT] true if flash write was done
 );

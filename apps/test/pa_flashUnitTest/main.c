@@ -236,7 +236,7 @@ static void Test_pa_flash_WriteDeltaCwe
     res = partition_OpenUbiSwifotaPartition(&ctx, true, &iswr);
 
     res = partition_OpenUbiVolumeSwifotaPartition(&ctx, 0, PA_FLASH_VOLUME_STATIC,
-                                                  4 * CHUNK_SIZE, "volume0", true);
+                                                  4 * CHUNK_SIZE, 0, "volume0", true);
 
     for( nb = 0; nb < 4 * CHUNK_SIZE; nb += sz)
     {
@@ -270,7 +270,7 @@ static void Test_pa_flash_WriteDeltaCwe
     res = partition_OpenUbiSwifotaPartition(&ctx, true, &iswr);
 
     res = partition_OpenUbiVolumeSwifotaPartition(&ctx, 1, PA_FLASH_VOLUME_DYNAMIC,
-                                                  -1, "volume1", true);
+                                                  -1, 1, "volume1", true);
 
     for( nb = 0; nb < 5 * CHUNK_SIZE; nb += sz)
     {

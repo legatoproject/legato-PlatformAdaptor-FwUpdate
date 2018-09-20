@@ -20,6 +20,10 @@
 #define CP_CWE         "../data/cp.cwe"
 #define LS2CP_CWE      "../data/ls2cp.cwe"
 #define CP2LS_CWE      "../data/cp2ls.cwe"
+#define LS_UBI_CWE     "../data/ls_ubi.cwe"
+#define CP_UBI_CWE     "../data/cp_ubi.cwe"
+#define LS2CP_UBI_CWE  "../data/ls2cp_ubi.cwe"
+#define CP2LS_UBI_CWE  "../data/cp2ls_ubi.cwe"
 
 
 //--------------------------------------------------------------------------------------------------
@@ -235,6 +239,29 @@ static void Testpa_fwupdate_DownloadDelta
     LE_INFO ("======== Test: Patch CP to LS ========");
     LE_TEST(LE_OK == pa_fwupdate_InitDownload());
     fd = open(CP2LS_CWE, O_RDONLY);
+    LE_ASSERT(fd >= 0);
+    LE_TEST(LE_OK == pa_fwupdate_Download(fd));
+    close(fd);
+    ApplySwifotaToBootPartition();
+
+    LE_INFO ("======== Test: Donwload CP_UBI ========");
+
+    fd = open(CP_UBI_CWE, O_RDONLY);
+    LE_ASSERT(fd >= 0);
+    LE_TEST(LE_OK == pa_fwupdate_Download(fd));
+    close(fd);
+    ApplySwifotaToBootPartition();
+
+    LE_INFO ("======== Test: Patch CP_UBI to LS_UBI ========");
+    fd = open(CP2LS_UBI_CWE, O_RDONLY);
+    LE_ASSERT(fd >= 0);
+    LE_TEST(LE_OK == pa_fwupdate_Download(fd));
+    close(fd);
+    ApplySwifotaToBootPartition();
+
+    LE_INFO ("======== Test: Patch LS_UBI to CP_UBI ========");
+    LE_TEST(LE_OK == pa_fwupdate_InitDownload());
+    fd = open(LS2CP_UBI_CWE, O_RDONLY);
     LE_ASSERT(fd >= 0);
     LE_TEST(LE_OK == pa_fwupdate_Download(fd));
     close(fd);

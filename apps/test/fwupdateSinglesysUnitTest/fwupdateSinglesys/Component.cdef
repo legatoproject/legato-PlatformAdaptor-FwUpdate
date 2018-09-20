@@ -10,9 +10,9 @@ requires:
 cflags:
 {
     -I${LEGATO_ROOT}/components/watchdogChain
-    -I${LEGATO_ROOT}/platformAdaptor/fwupdate/pa_flash/inc
     -I${LEGATO_ROOT}/platformAdaptor/fwupdate/common
     -I${LEGATO_ROOT}/platformAdaptor/fwupdate/mdm9x07/le_pa_fwupdate_singlesys
+    -I${LEGATO_ROOT}/platformAdaptor/fwupdate/mdm9x07/le_pa_fwupdate_singlesys/imgpatch
     -I${LEGATO_ROOT}/3rdParty/bsdiff-4.3
     -DLE_MEM_VALGRIND
     -DPA_FWUPDATE_APP_PRODUCT_ID=0x59393231
@@ -29,6 +29,8 @@ cflags:
 ldflags:
 {
     -lbz2
+    -lz
+    -lssl
 }
 
 sources:
@@ -39,6 +41,9 @@ sources:
     ${LEGATO_ROOT}/platformAdaptor/fwupdate/mdm9x07/le_pa_fwupdate_singlesys/pa_fwupdate_singlesys.c
     ${LEGATO_ROOT}/platformAdaptor/fwupdate/mdm9x07/le_pa_fwupdate_singlesys/deltaUpdate.c
     ${LEGATO_ROOT}/platformAdaptor/fwupdate/mdm9x07/le_pa_fwupdate_singlesys/pa_patch.c
+    ${LEGATO_ROOT}/platformAdaptor/fwupdate/mdm9x07/le_pa_fwupdate_singlesys/imgpatch/applyPatch.c
+    ${LEGATO_ROOT}/platformAdaptor/fwupdate/mdm9x07/le_pa_fwupdate_singlesys/imgpatch/imgpatch.c
+    ${LEGATO_ROOT}/platformAdaptor/fwupdate/mdm9x07/le_pa_fwupdate_singlesys/imgpatch/imgpatch_utils.c
     ${LEGATO_ROOT}/platformAdaptor/fwupdate/common/cwe.c
     ${LEGATO_ROOT}/platformAdaptor/fwupdate/common/utils.c
     ${LEGATO_ROOT}/3rdParty/bsdiff-4.3/bspatch.c

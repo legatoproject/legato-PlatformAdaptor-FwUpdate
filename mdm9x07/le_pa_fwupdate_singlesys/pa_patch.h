@@ -39,7 +39,7 @@ pa_patch_Image_t;
  * Define the value of an invalid UBI volume ID
  */
 //--------------------------------------------------------------------------------------------------
-#define PA_PATCH_INVALID_UBI_VOL_ID  0xFFFFFFFFU
+#define PA_PATCH_INVALID_UBI_VOL_ID  0xFFFFU
 
 //--------------------------------------------------------------------------------------------------
 /**
@@ -50,10 +50,10 @@ typedef union
 {
     struct
     {
-        int mtdNum;         ///< MTD number for RAW flash
-        uint32_t ubiVolId;  ///< UBI volumr ID for UBI data into RAW flash
-        bool isLogical;     ///< MTD is "logical"
-        bool isDual;        ///< "Dual partition" of the "logical" MTD
+        int mtdNum;          ///< MTD number for RAW flash
+        uint32_t ubiVolId;   ///< UBI volume ID for UBI data into RAW flash
+        bool isLogical;      ///< MTD is "logical"
+        bool isDual;         ///< "Dual partition" of the "logical" MTD
     }
     flash;
 }

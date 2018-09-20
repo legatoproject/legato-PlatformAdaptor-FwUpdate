@@ -16,15 +16,21 @@ sources:
     ../../mdm9x07/le_pa_fwupdate_singlesys/pa_flash_ubi.c
     ../../mdm9x07/le_pa_fwupdate_singlesys/deltaUpdate.c
     ../../mdm9x07/le_pa_fwupdate_singlesys/pa_patch.c
+    ../../mdm9x07/le_pa_fwupdate_singlesys/imgpatch/applyPatch.c
+    ../../mdm9x07/le_pa_fwupdate_singlesys/imgpatch/imgpatch.c
+    ../../mdm9x07/le_pa_fwupdate_singlesys/imgpatch/imgpatch_utils.c
     ${LEGATO_ROOT}/3rdParty/bsdiff-4.3/bspatch.c
 }
 
 cflags:
 {
     -DPA_FWUPDATE_APP_PRODUCT_ID=0x59393331
+    -DPA_FWUPDATE_ALT_APP_PRODUCT_ID=0x59393231
     -DPA_FWUPDATE_USR_PRODUCT_ID=0x39583036
+    -DPA_FWUPDATE_ALT_USR_PRODUCT_ID=0x39583238
     -DSIERRA_BSPATCH
     -I${LEGATO_FWUPDATE_PA_SINGLESYS}/../../mdm9x07/le_pa_fwupdate_singlesys/
+    -I${LEGATO_FWUPDATE_PA_SINGLESYS}/../../mdm9x07/le_pa_fwupdate_singlesys/imgpatch
     -I${LEGATO_FWUPDATE_PA_SINGLESYS}/../../common/
     -I${LEGATO_ROOT}/3rdParty/include
     -I${LEGATO_ROOT}/3rdParty/bsdiff-4.3
@@ -37,4 +43,6 @@ cflags:
 ldflags:
 {
     -lbz2
+    -lz
+    -lssl
 }

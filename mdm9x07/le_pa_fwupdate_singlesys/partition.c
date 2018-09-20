@@ -714,7 +714,7 @@ le_result_t partition_CheckUbiVolumeData
         LE_ERROR("Scan of MTD %d for UBI vol Id %u fails: %m", mtdNum, ubiVolId );
         goto error;
     }
-    if (LE_OK != pa_flash_GetUbiTypeAndName( flashFd,  &ubiVolType, NULL ))
+    if (LE_OK != pa_flash_GetUbiTypeAndName( flashFd,  &ubiVolType, NULL, NULL ))
     {
         LE_ERROR("Scan of MTD %d for UBI vol Id %u fails: %m", mtdNum, ubiVolId );
         goto error;
@@ -824,7 +824,7 @@ le_result_t partition_GetSwifotaOffsetPartition
     if( LE_OK == res )
     {
         *offsetPtr -= (IMG_BLOCK_OFFSET * FlashInfoPtr->eraseSize);
-        *offsetPtr += InOffset ;
+        *offsetPtr += InOffset;
     }
     return res;
 }
@@ -1578,6 +1578,7 @@ le_result_t partition_OpenUbiVolumeSwifotaPartition
     uint32_t ubiVolId,                ///< [IN] UBI volume ID
     uint32_t ubiVolType,              ///< [IN] UBI volume type
     uint32_t ubiVolSize,              ///< [IN] UBI volume size
+    uint32_t ubiVolFlags,             ///< [IN] UBI volume flags
     char* ubiVolName,                 ///< [IN] UBI volume name
     bool createVol                    ///< [IN] true if volume needs to be created
 )
@@ -1592,11 +1593,13 @@ le_result_t partition_OpenUbiVolumeSwifotaPartition
         LE_ERROR("pa_flash_GetUbiOffset fails : %d", res);
         return res;
     }
-    res = pa_flash_CreateUbiVolume(MtdFd, ubiVolId, ubiVolName, ubiVolType, ubiVolSize);
+    res = pa_flash_CreateUbiVolumeWithFlags(MtdFd,
+                                            ubiVolId, ubiVolName, ubiVolType, ubiVolSize,
+                                            ubiVolFlags);
     if( LE_OK != res)
     {
-        LE_ERROR("pa_flash_CreateUbiVolume \"%s\" (%u, %u, %u) fails: %d",
-                 ubiVolName, ubiVolId, ubiVolType, ubiVolSize, res);
+        LE_ERROR("pa_flash_CreateUbiVolumeWithFlags \"%s\" (%u, %u, %u, %u) fails: %d",
+                 ubiVolName, ubiVolId, ubiVolType, ubiVolFlags, ubiVolSize, res);
         return res;
     }
     UbiWriteLeb = 0;

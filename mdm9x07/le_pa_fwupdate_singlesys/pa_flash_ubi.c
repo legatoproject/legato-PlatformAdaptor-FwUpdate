@@ -555,7 +555,7 @@ static le_result_t GetNewBlock
         return LE_OUT_OF_RANGE;
     }
 
-    for( ieb = descPtr->ubiBasePeb; ieb < infoPtr->nbLeb - descPtr->ubiBasePeb; ieb++ )
+    for( ieb = descPtr->ubiBasePeb; ieb < infoPtr->nbLeb; ieb++ )
     {
         int lebIndex;
 
@@ -1196,7 +1196,7 @@ le_result_t pa_flash_CheckUbiAtOffset
     }
 
     *isUbiPtr = false;
-    for( peb = descPtr->ubiBasePeb; peb < infoPtr->nbLeb - descPtr->ubiBasePeb; peb++ )
+    for( peb = descPtr->ubiBasePeb; peb < infoPtr->nbLeb; peb++ )
     {
         LE_DEBUG("Check if bad block at peb %u", peb);
         res = pa_flash_CheckBadBlock( descPtr, peb, &isBad );
@@ -1319,7 +1319,7 @@ le_result_t pa_flash_ScanUbiForVolumesAtOffset
     memset(descPtr->vtbl, 0, sizeof(struct ubi_vtbl_record) * PA_FLASH_UBI_MAX_VOLUMES);
     memset(descPtr->vtblPeb, -1, sizeof(descPtr->vtblPeb));
     memset(descPtr->ubiLebToPeb, -1, sizeof(descPtr->ubiLebToPeb));
-    for( peb = descPtr->ubiBasePeb; (peb < infoPtr->nbLeb - descPtr->ubiBasePeb); peb++ )
+    for( peb = descPtr->ubiBasePeb; peb < infoPtr->nbLeb; peb++ )
     {
         LE_DEBUG("Check if bad block at peb %u", peb);
         res = pa_flash_CheckBadBlock( desc, peb, &isBad );
@@ -1353,6 +1353,7 @@ le_result_t pa_flash_ScanUbiForVolumesAtOffset
             LE_CRIT("Error when reading VID Header at %d", peb);
             goto error;
         }
+
         if (UBI_LAYOUT_VOLUME_ID == be32toh(vidHeader.vol_id))
         {
             descPtr->ubiDataOffset = be32toh(ecHeader.data_offset);
@@ -1492,7 +1493,7 @@ le_result_t pa_flash_ScanUbiAtOffset
         return LE_OUT_OF_RANGE;
     }
 
-    for( peb = descPtr->ubiBasePeb; peb < infoPtr->nbLeb - descPtr->ubiBasePeb; peb++ )
+    for( peb = descPtr->ubiBasePeb; peb < infoPtr->nbLeb; peb++ )
     {
         LE_DEBUG("Check if bad block at peb %u", peb);
         res = pa_flash_CheckBadBlock( desc, peb, &isBad );
@@ -2333,8 +2334,9 @@ le_result_t pa_flash_GetUbiTypeAndName
 (
     pa_flash_Desc_t desc,         ///< [IN] Private flash descriptor
     uint32_t*       volTypePtr,   ///< [OUT] Type of the volume
-    char            volName[PA_FLASH_UBI_MAX_VOLUMES]
+    char            volName[PA_FLASH_UBI_MAX_VOLUMES],
                                   ///< [OUT] Name of the volume
+    uint32_t*       volFlagsPtr   ///< [OUT] Flags set to the volume
 )
 {
     pa_flash_MtdDesc_t *descPtr = (pa_flash_MtdDesc_t *)desc;
@@ -2357,6 +2359,10 @@ le_result_t pa_flash_GetUbiTypeAndName
     if (volTypePtr)
     {
         *volTypePtr = descPtr->vtblPtr->vol_type;
+    }
+    if (volFlagsPtr)
+    {
+        *volFlagsPtr = descPtr->vtblPtr->flags;
     }
     return LE_OK;
 }
@@ -2860,13 +2866,14 @@ error:
  *      - LE_NO_MEMORY     If a volume requires more PEBs than the partition size
  */
 //--------------------------------------------------------------------------------------------------
-le_result_t pa_flash_CreateUbiVolume
+le_result_t pa_flash_CreateUbiVolumeWithFlags
 (
     pa_flash_Desc_t desc,      ///< [IN] Private flash descriptor
     uint32_t ubiVolId,         ///< [IN] UBI volume ID
     const char* ubiVolNamePtr, ///< [IN] UBI volume name
     uint32_t ubiVolType,       ///< [IN] UBI volume type: dynamic or static
-    uint32_t ubiVolSize        ///< [IN] UBI volume size (for dynamic volumes only)
+    uint32_t ubiVolSize,       ///< [IN] UBI volume size (for dynamic volumes only)
+    uint32_t ubiVolFlags       ///< [IN] UBI volume flags (for dynamic volumes only)
 )
 {
     pa_flash_MtdDesc_t *descPtr = (pa_flash_MtdDesc_t *)desc;
@@ -2885,7 +2892,6 @@ le_result_t pa_flash_CreateUbiVolume
     {
         return LE_BAD_PARAMETER;
     }
-
     switch (ubiVolType)
     {
         case PA_FLASH_VOLUME_DYNAMIC:
@@ -2905,7 +2911,7 @@ le_result_t pa_flash_CreateUbiVolume
         default:
             return LE_BAD_PARAMETER;
     }
-
+    LE_INFO("UbiOffset: %ld", descPtr->ubiAbsOffset);
     res = pa_flash_ScanUbiForVolumesAtOffset(desc, descPtr->ubiAbsOffset, NULL, NULL);
     if (LE_OK != res)
     {
@@ -3042,6 +3048,8 @@ le_result_t pa_flash_CreateUbiVolume
         vtblPtr[ubiVolId].reserved_pebs = htobe32(volPebs);
         vtblPtr[ubiVolId].alignment = htobe32(1);
         vtblPtr[ubiVolId].vol_type = ubiVolType;
+        vtblPtr[ubiVolId].flags = (uint8_t)(ubiVolFlags & 0xFF);
+
         crc = le_crc_Crc32( (uint8_t *)&vtblPtr[ubiVolId],
                             UBI_VTBL_RECORD_SIZE_CRC,
                             LE_CRC_START_CRC32 );

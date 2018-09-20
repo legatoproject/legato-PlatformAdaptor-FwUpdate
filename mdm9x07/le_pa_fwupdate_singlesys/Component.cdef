@@ -16,6 +16,9 @@ sources:
     pa_flash_ubi.c
     deltaUpdate.c
     pa_patch.c
+    imgpatch/applyPatch.c
+    imgpatch/imgpatch.c
+    imgpatch/imgpatch_utils.c
     ${LEGATO_ROOT}/3rdParty/bsdiff-4.3/bspatch.c
 }
 
@@ -25,6 +28,7 @@ cflags:
     -DPA_FWUPDATE_USR_PRODUCT_ID=0x39583238
     -DSIERRA_BSPATCH
     -I${LEGATO_FWUPDATE_PA_SINGLESYS}/
+    -I${LEGATO_FWUPDATE_PA_SINGLESYS}/imgpatch
     -I${LEGATO_FWUPDATE_PA_SINGLESYS}/../../common/
     -I${LEGATO_ROOT}/3rdParty/include
     -I${LEGATO_ROOT}/3rdParty/bsdiff-4.3
@@ -37,4 +41,6 @@ cflags:
 ldflags:
 {
     -lbz2
+    -lz
+    -lssl
 }
