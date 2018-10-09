@@ -2837,6 +2837,7 @@ le_result_t pa_flash_CreateUbiAtOffset
         {
             goto error;
         }
+        descPtr->vtblPeb[nbVtblPeb] = peb;
         LE_INFO("PEB %u: Write VTBL, LNUM %u", peb, nbVtblPeb);
     }
     le_mem_Release(blockPtr);
@@ -2850,6 +2851,8 @@ error:
     descPtr->ubiAbsOffset = 0;
     descPtr->ubiOffsetInPeb = 0;
     descPtr->ubiBasePeb = 0;
+    descPtr->vtblPeb[0] = -1;
+    descPtr->vtblPeb[1] = -1;
     return res;
 }
 
@@ -2912,10 +2915,13 @@ le_result_t pa_flash_CreateUbiVolumeWithFlags
             return LE_BAD_PARAMETER;
     }
     LE_INFO("UbiOffset: %ld", descPtr->ubiAbsOffset);
-    res = pa_flash_ScanUbiForVolumesAtOffset(desc, descPtr->ubiAbsOffset, NULL, NULL);
-    if (LE_OK != res)
+    if( !descPtr->scanDone || ((-1 == descPtr->vtblPeb[0]) || (-1 == descPtr->vtblPeb[1])) )
     {
-        goto error_unscan;
+        res = pa_flash_ScanUbiForVolumesAtOffset(desc, descPtr->ubiAbsOffset, NULL, NULL);
+        if (LE_OK != res)
+        {
+            goto error_unscan;
+        }
     }
     for (vol = 0; vol < PA_FLASH_UBI_MAX_VOLUMES; vol++ )
     {
@@ -2947,6 +2953,12 @@ le_result_t pa_flash_CreateUbiVolumeWithFlags
     }
 
     infoPtr = &descPtr->mtdInfo;
+    descPtr->ubiVolumeId = INVALID_UBI_VOLUME;
+    descPtr->vtblPtr = NULL;
+    memset(descPtr->ubiLebToPeb, -1, sizeof(descPtr->ubiLebToPeb));
+    infoPtr->ubiVolFreeSize = 0;
+    infoPtr->ubi = false;
+
     if ((!UbiBlockPool))
     {
         UbiBlockPool = le_mem_CreatePool("UBI Block Pool", infoPtr->eraseSize);
@@ -2985,6 +2997,7 @@ le_result_t pa_flash_CreateUbiVolumeWithFlags
                 goto error;
             }
         }
+        infoPtr->ubiPebFreeCount--;
     }
 
     if (UBI_VID_STATIC == volType)
@@ -3015,6 +3028,7 @@ le_result_t pa_flash_CreateUbiVolumeWithFlags
         {
             goto error;
         }
+        descPtr->ubiLebToPeb[0] = volPeb;
     }
 
     // Update the VTBL to register the new volume name at volume ID position
@@ -3074,8 +3088,11 @@ le_result_t pa_flash_CreateUbiVolumeWithFlags
         }
     }
 
+    memcpy(descPtr->vtbl, vtblPtr, sizeof(descPtr->vtbl));
+    descPtr->ubiVolumeId = ubiVolId;
+    descPtr->vtblPtr = &(descPtr->vtbl[descPtr->ubiVolumeId]);
+    infoPtr->ubi = true;
     le_mem_Release(blockPtr);
-    return pa_flash_UnscanUbi(desc);
 
     return LE_OK;
 

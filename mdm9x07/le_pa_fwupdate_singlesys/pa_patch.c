@@ -369,7 +369,6 @@ le_result_t pa_patch_WriteSegment
     int blk;
     size_t theSize;
     uint32_t remSize;
-    off_t blkOff;
     le_result_t res;
 
     if( (!desc) || (descPtr->magic != desc) )
@@ -377,7 +376,6 @@ le_result_t pa_patch_WriteSegment
         return LE_BAD_PARAMETER;
     }
 
-    (void)partition_GetSwifotaOffsetPartition( &blkOff );
     switch( descPtr->context.destImage )
     {
         case PA_PATCH_IMAGE_RAWFLASH:
@@ -388,7 +386,6 @@ le_result_t pa_patch_WriteSegment
                               : remSize);
                 res = partition_WriteSwifotaPartition((partition_Ctx_t*)descPtr->context.destArg1,
                                                       &theSize,
-                                                      offset + blk,
                                                       &dataPtr[blk],
                                                       false, NULL);
                 if (LE_OK != res)

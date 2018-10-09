@@ -602,7 +602,7 @@ static le_result_t WriteData
     }
     else
     {
-        ret = partition_WriteSwifotaPartition(&PartitionCtx, lengthPtr, offset, dataPtr,
+        ret = partition_WriteSwifotaPartition(&PartitionCtx, lengthPtr, dataPtr,
                                               forceClose, isFlashedPtr);
         if( !forceClose )
         {
@@ -950,7 +950,6 @@ static le_result_t WriteMetaImageData
         tmpLength = length - writtenLength;
         if (LE_OK != partition_WriteSwifotaPartition(&PartitionCtx,
                                               &tmpLength,
-                                              CurrentOutImageOffset,
                                               dataPtr+writtenLength,
                                               false, &isFlashed))
         {
@@ -2589,4 +2588,6 @@ COMPONENT_INIT
         LE_ERROR("Error when getting the resume context");
         pa_fwupdate_InitDownload();
     }
+
+    partition_Initialize();
 }

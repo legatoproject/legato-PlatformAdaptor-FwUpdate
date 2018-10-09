@@ -162,6 +162,37 @@ le_result_t partition_CheckUbiVolumeData
 
 //--------------------------------------------------------------------------------------------------
 /**
+ * Get the partition internals to be save for Suspend/Resume. If the partition internals does not
+ * exist, it is created.
+ *
+ * @return
+ *      - LE_OK on success
+ *      - LE_BAD_PARAMETER if one parameter is NULL
+ */
+//--------------------------------------------------------------------------------------------------
+le_result_t partition_GetPartitionInternals
+(
+    void** partitionPtr,                ///< [OUT] Pointer to the partition internals
+    size_t* partitionSizePtr            ///< [OUT] Pointer to the partition internals size
+);
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Set the partition internals to be restored for Suspend/Resume. If the partition internals does
+ * not exist, it is created.
+ *
+ * @return
+ *      - LE_OK on success
+ *      - LE_BAD_PARAMETER if one parameter is invalid or if the magic check fails
+ */
+//--------------------------------------------------------------------------------------------------
+le_result_t partition_SetPartitionInternals
+(
+    void* partitionPtr                  ///< [IN] Pointer to the partition internals
+);
+
+//--------------------------------------------------------------------------------------------------
+/**
  * Get absolute current data offset in SWIFOTA partition
  *
  * @return
@@ -251,7 +282,6 @@ le_result_t partition_WriteSwifotaPartition
 (
     partition_Ctx_t *ctxPtr,          ///< [INOUT] Context
     size_t* lengthPtr,                ///< [INOUT] Data length pointer
-    size_t offset,                    ///< [IN] Data offset in the package
     const uint8_t* dataPtr,           ///< [IN] Input data
     bool forceClose,                  ///< [IN] Force close of device and resources
     bool *isFlashedPtr                ///< [OUT] True if flash write was done
@@ -396,6 +426,17 @@ le_result_t partition_WriteMetaData
     size_t offset,                    ///< [IN] Data offset in the package
     const uint8_t* dataPtr,           ///< [IN] Input data
     bool forceClose                   ///< [IN] Force close of device and resources
+);
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Initialize partition pool and internal data
+ *
+ */
+//--------------------------------------------------------------------------------------------------
+void partition_Initialize
+(
+    void
 );
 
 #endif /* LEGATO_PARTITONLOCAL_INCLUDE_GUARD */

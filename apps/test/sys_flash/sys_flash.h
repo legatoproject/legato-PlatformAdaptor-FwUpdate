@@ -17,3 +17,15 @@ void sys_flash_SetEccState
 (
     bool eccState
 );
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Initialize the emulated flash layer
+ */
+//--------------------------------------------------------------------------------------------------
+#ifdef SYS_FLASH_INIT
+void sys_flashInit
+(
+    void
+);
+#endif

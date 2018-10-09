@@ -23,3 +23,6 @@ add_subdirectory(fwupdateSinglesysUnitTest)
 
 # pa_flash unitary test
 add_subdirectory(pa_flashUnitTest)
+
+# Single system Suspend/Resume unitary test
+add_subdirectory(fwupdateSuspendResumeUnitTest)

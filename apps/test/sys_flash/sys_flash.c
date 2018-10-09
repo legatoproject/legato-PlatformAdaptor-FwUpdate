@@ -6,6 +6,17 @@
  * Copyright (C) Sierra Wireless Inc.
  */
 
+// Undefine all services provided by this module, if compiled with -Dopen=sys_flashOpen.
+// This will prevent unexpected recursion and insure that the system call is really called.
+#undef fopen
+#undef open
+#undef write
+#undef ioctl
+#undef opendir
+#undef unlink
+#undef rename
+#undef system
+
 #include <stdio.h>
 #include <limits.h>
 #include <unistd.h>
@@ -67,6 +78,24 @@ static struct
 }
 SysFlashMtd[] =
 {
+#ifdef SYS_FLASH_REAL_FLASH
+    { "sbl",         10, -1, {    NULL, }, },
+    { "tz",           6, -1, {    NULL, }, },
+    { "rpm",          6, -1, {    NULL, }, },
+    { "modem",      128,  1, { "modem", NULL, }, },
+    { "modem2",     128, -1, { "modem", NULL, }, }, // Dual system
+    { "swifota",    300, -1, {    NULL, }, }, // Single system
+    { "aboot",        4, -1, { NULL, }, },
+    { "boot",        60, -1, { NULL, }, },
+    { "system",     120,  0, { "rootfs", NULL, }, }, // Dual system
+    { "lefwkro",     35,  2, { "legato", NULL, }, }, // Dual system
+    { "customer0",   10, -1, { NULL, }, },
+    { "aboot2",       4, -1, { NULL, }, },
+    { "boot2",       60, -1, { NULL, }, },
+    { "system2",    120, -1, { "rootfs", NULL, }, }, // Dual system
+    { "lefwkro2",    35, -1, { "legato", NULL, }, }, // Dual system
+    { "customer1",   10, -1, { NULL, }, },
+#else
     { "sbl",          8, -1, {    NULL, }, },
     { "tz",           6, -1, {    NULL, }, },
     { "rpm",          8, -1, {    NULL, }, },
@@ -83,6 +112,7 @@ SysFlashMtd[] =
     { "system2",     20, -1, { "rootfs", NULL, }, }, // Dual system
     { "lefwkro2",    10, -1, { "legato", NULL, }, }, // Dual system
     { "customer1",   10, -1, { NULL, }, },
+#endif
 };
 
 //--------------------------------------------------------------------------------------------------
@@ -432,7 +462,7 @@ int sys_flashSystem
         errno = EPERM;
         return -1;
     }
-    else if (0 == strncmp(command, "/home/root/bspatch", 18))
+    else if (0 == strncmp(command, "bspatch", 6))
     {
         return system(command);
     }
@@ -441,10 +471,17 @@ int sys_flashSystem
 
 //--------------------------------------------------------------------------------------------------
 /**
- * Main of the test.
+ * Initialize the simulated flash layer
  */
 //--------------------------------------------------------------------------------------------------
+#ifdef SYS_FLASH_INIT
+void sys_flashInit
+(
+    void
+)
+#else
 COMPONENT_INIT
+#endif
 {
     FILE* flashFdPtr;
     FILE* mtdFdPtr;
