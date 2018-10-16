@@ -15,12 +15,18 @@ cflags:
     -I${LEGATO_ROOT}/platformAdaptor/fwupdate/common
     -DLE_MEM_VALGRIND
     -DPA_FWUPDATE_PRODUCT_ID=0x39583430
+    -DSIERRA_BSPATCH
     -Dfopen=sys_flashFOpen
     -Dopen=sys_flashOpen
     -Dioctl=sys_flashIoctl
     -Dwrite=sys_flashWrite
     -Dopendir=sys_flashOpendir
     -Dsystem=sys_flashSystem
+}
+
+ldflags:
+{
+    -lbz2
 }
 
 sources:
@@ -32,6 +38,8 @@ sources:
     ${LEGATO_ROOT}/platformAdaptor/fwupdate/common/cwe.c
     ${LEGATO_ROOT}/platformAdaptor/fwupdate/mdm9x40/le_pa_fwupdate_dualsys/deltaUpdate.c
     ${LEGATO_ROOT}/platformAdaptor/fwupdate/common/utils.c
+    ${LEGATO_ROOT}/platformAdaptor/fwupdate/pa_patch/src/pa_patch.c
+    ${LEGATO_ROOT}/3rdParty/bsdiff-4.3/bspatch.c
     fwupdate_stubs.c
     wdg_stubs.c
 }

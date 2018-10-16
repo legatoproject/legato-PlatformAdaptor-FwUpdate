@@ -1,0 +1,28 @@
+requires:
+{
+    api:
+    {
+        le_fwupdate.api         [types-only]
+    }
+}
+
+sources:
+{
+    ${LEGATO_ROOT}/platformAdaptor/fwupdate/apps/test/sys_flash/sys_flash.c
+    main.c
+}
+
+cflags:
+{
+    -I${LEGATO_ROOT}/platformAdaptor/fwupdate/apps/test/sys_flash/
+    -DSYS_FLASH_ERASESIZE=262144
+    -DSYS_FLASH_WRITESIZE=4096
+    -DSYS_FLASH_INIT
+    -DSYS_FLASH_REAL_FLASH
+    -DSYS_FLASH_DUALSYS
+    -Dfopen=sys_flashFOpen
+    -Dopen=sys_flashOpen
+    -Dopendir=sys_flashOpendir
+    -Drename=sys_flashRename
+    -Dunlink=sys_flashUnlink
+}

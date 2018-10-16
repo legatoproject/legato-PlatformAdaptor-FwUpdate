@@ -83,18 +83,25 @@ SysFlashMtd[] =
     { "tz",           6, -1, {    NULL, }, },
     { "rpm",          6, -1, {    NULL, }, },
     { "modem",      128,  1, { "modem", NULL, }, },
+#ifdef SYS_FLASH_DUALSYS
     { "modem2",     128, -1, { "modem", NULL, }, }, // Dual system
+#else
     { "swifota",    300, -1, {    NULL, }, }, // Single system
+#endif
     { "aboot",        4, -1, { NULL, }, },
     { "boot",        60, -1, { NULL, }, },
     { "system",     120,  0, { "rootfs", NULL, }, }, // Dual system
-    { "lefwkro",     35,  2, { "legato", NULL, }, }, // Dual system
+#ifdef SYS_FLASH_DUALSYS
+    { "lefwkro",    252,  2, { "legato", NULL, }, }, // Dual system
     { "customer0",   10, -1, { NULL, }, },
     { "aboot2",       4, -1, { NULL, }, },
     { "boot2",       60, -1, { NULL, }, },
     { "system2",    120, -1, { "rootfs", NULL, }, }, // Dual system
-    { "lefwkro2",    35, -1, { "legato", NULL, }, }, // Dual system
+    { "lefwkro2",   252, -1, { "legato", NULL, }, }, // Dual system
     { "customer1",   10, -1, { NULL, }, },
+#else
+    { "lefwkro",     35,  2, { "legato", NULL, }, }, // Dual system
+#endif
 #else
     { "sbl",          8, -1, {    NULL, }, },
     { "tz",           6, -1, {    NULL, }, },

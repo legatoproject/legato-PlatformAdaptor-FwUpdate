@@ -409,6 +409,7 @@ le_result_t pa_fwupdate_NvupWrite
     return LE_OK;
 }
 
+#ifndef SIERRA_BSPATCH
 //--------------------------------------------------------------------------------------------------
 /**
  * Sierra bsPatch function.
@@ -430,3 +431,4 @@ le_result_t bsPatch
 {
     return LE_OK;
 }
+#endif

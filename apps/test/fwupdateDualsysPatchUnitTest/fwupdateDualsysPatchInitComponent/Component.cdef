@@ -1,0 +1,10 @@
+sources:
+{
+    main.c
+}
+
+cflags:
+{
+    -I${LEGATO_ROOT}/platformAdaptor/fwupdate/apps/test/sys_flash
+    -DSYS_FLASH_INIT
+}
