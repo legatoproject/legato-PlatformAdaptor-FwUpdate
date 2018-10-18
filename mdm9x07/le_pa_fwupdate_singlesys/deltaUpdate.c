@@ -18,7 +18,6 @@
 #include "pa_flash_local.h"
 #include "imgpatch.h"
 
-
 //--------------------------------------------------------------------------------------------------
 /**
  * Define the temporary patch path
@@ -129,15 +128,18 @@ error:
 static le_result_t OpenUbiVolume
 (
     partition_Ctx_t* partCtxPtr,
-    deltaUpdate_PatchMetaHdr_t* metaHdrPtr,
+    deltaUpdate_Ctx_t* ctxPtr,
     pa_flash_Desc_t desc
 )
 {
+    deltaUpdate_PatchMetaHdr_t* metaHdrPtr = ctxPtr->metaHdrPtr;
     uint32_t volType;
     uint32_t volFlags;
+    bool createVolumeReq = *(ctxPtr->ubiVolumeCreatedPtr) ? false : true;
+
 
     char volName[PA_FLASH_UBI_MAX_VOLUMES]= "";
-    LE_INFO("desc: %p", desc);
+    LE_INFO("createVolumeReq: %d, desc: %p", createVolumeReq, desc);
     // Get ubi volume and type
     le_result_t result = pa_flash_GetUbiTypeAndName(desc, &volType, volName, &volFlags);
 
@@ -161,12 +163,17 @@ static le_result_t OpenUbiVolume
                                                              : -1,
                                                          volFlags,
                                                          volName,
-                                                         true))
+                                                         createVolumeReq))
 
     {
         LE_ERROR("Failed to create ubi volume inside swifota");
         return LE_FAULT;
     }
+
+    // The volume is sucessfully created. Set this boolean to be able to re-open the volume later
+    // without recreate it
+    *(ctxPtr->ubiVolumeCreatedPtr) = true;
+
     return LE_OK;
 }
 
@@ -182,15 +189,20 @@ static le_result_t OpenUbiVolume
 static le_result_t CloseAndVerifyUbiVolume
 (
     partition_Ctx_t* partCtxPtr,
-    deltaUpdate_PatchMetaHdr_t* metaHdrPtr
+    deltaUpdate_Ctx_t* ctxPtr
 )
 {
+    deltaUpdate_PatchMetaHdr_t* metaHdrPtr = ctxPtr->metaHdrPtr;
+
     if (LE_OK != partition_CloseUbiVolumeSwifotaPartition(partCtxPtr,
                                                            metaHdrPtr->destSize, false, NULL))
     {
         LE_ERROR("Failed to close ubi volume inside swifota partition");
         return LE_FAULT;
     }
+
+    // The volume is sucessfully closed. Clear this boolean to be able to create other volumes later
+    *(ctxPtr->ubiVolumeCreatedPtr) = false;
 
     uint32_t crc = 0, fullCrc = 0;
     size_t volSize = 0, fullSize = 0;
@@ -255,7 +267,7 @@ static le_result_t  ApplyUbiPatch
     if (0 == memcmp(ctxPtr->metaHdrPtr->diffType, NODIFF_MAGIC, strlen(NODIFF_MAGIC)))
     {
         // Must have opened a ubi volume before, no need to create ubi
-        if (LE_OK != OpenUbiVolume(partCtxPtr, ctxPtr->metaHdrPtr, desc))
+        if (LE_OK != OpenUbiVolume(partCtxPtr, ctxPtr, desc))
         {
             LE_ERROR("Failed to create ubi volume inside swifota");
             return LE_FAULT;
@@ -268,7 +280,7 @@ static le_result_t  ApplyUbiPatch
         }
         *wrLenToFlash = ctxPtr->metaHdrPtr->destSize;
         // Close ubi volume partition
-        if (LE_OK != CloseAndVerifyUbiVolume(partCtxPtr, ctxPtr->metaHdrPtr))
+        if (LE_OK != CloseAndVerifyUbiVolume(partCtxPtr, ctxPtr))
         {
             LE_ERROR("Failed to close ubi volume inside swifota partition");
             return LE_FAULT;
@@ -286,9 +298,8 @@ static le_result_t  ApplyUbiPatch
             return LE_FAULT;
         }
 
-        if (value)
+        if ((value) || (ctxPtr->reopenUbiVolume))
         {
-
             // Patch is related to an UBI volume
             // Check if the image inside the original UBI container has the right CRC
             if (LE_OK != CheckUbiData( mtdOrigNum,
@@ -301,12 +312,14 @@ static le_result_t  ApplyUbiPatch
                 return LE_FAULT;
             }
 
-            if (LE_OK != OpenUbiVolume(partCtxPtr, ctxPtr->metaHdrPtr, desc))
+            if (LE_OK != OpenUbiVolume(partCtxPtr, ctxPtr, desc))
             {
                 LE_ERROR("Failed to create ubi volume inside swifota");
                 return LE_FAULT;
             }
+            ctxPtr->reopenUbiVolume = false;
         }
+
         result = applyPatch_ApplyImgPatch(ctxPtr->imgCtxPtr, patchFilePtr, desc,
                                           partCtxPtr, wrLenToFlash);
 
@@ -326,7 +339,7 @@ static le_result_t  ApplyUbiPatch
         if (value)
         {
             // Close ubi volume partition
-            if (LE_OK != CloseAndVerifyUbiVolume(partCtxPtr, ctxPtr->metaHdrPtr))
+            if (LE_OK != CloseAndVerifyUbiVolume(partCtxPtr, ctxPtr))
             {
                 LE_ERROR("Failed to close ubi volume inside swifota partition");
                 return LE_FAULT;
@@ -356,6 +369,46 @@ static le_result_t  ApplyUbiPatch
 //==================================================================================================
 //  PUBLIC API FUNCTIONS
 //==================================================================================================
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * This function is used to resume delta update
+ *
+ */
+//--------------------------------------------------------------------------------------------------
+void deltaUpdate_ResumeCtx
+(
+    partition_Ctx_t* partCtxPtr,     ///< [IN] Partition context
+    deltaUpdate_Ctx_t* ctxPtr        ///< [IN] Delta update context
+)
+{
+    if (!ctxPtr || !partCtxPtr)
+    {
+        LE_ERROR("Bad input parameter. ctxPtr: %p, partCtxPtr: %p", ctxPtr, partCtxPtr);
+        return;
+    }
+
+    if (0 == memcmp(ctxPtr->metaHdrPtr->diffType, IMGDIFF_MAGIC, strlen(IMGDIFF_MAGIC)))
+    {
+        bool value = false;
+        if(LE_OK != applyPatch_IsFirstPatch(ctxPtr->imgCtxPtr, &value))
+        {
+            LE_ERROR("Bad imgpatch context: %p", ctxPtr->imgCtxPtr);
+            return;
+        }
+
+        if (!value)
+        {
+            // We are not in the first patch. UBI volume has already been created and data has
+            // already been written. We need to reopen the volume later without erasing its content.
+            ctxPtr->reopenUbiVolume = true;
+        }
+    }
+    else
+    {
+        ctxPtr->reopenUbiVolume = false;
+    }
+}
 
 //--------------------------------------------------------------------------------------------------
 /**

@@ -222,6 +222,12 @@ static le_result_t FlashRead
 
     if( descPtr->ubiAbsOffset )
     {
+
+        if( (!UbiBlockPool) )
+        {
+            UbiBlockPool = le_mem_CreatePool("UBI Block Pool", descPtr->mtdInfo.eraseSize);
+            le_mem_ExpandPool( UbiBlockPool, 1 );
+        }
         uint8_t* blockPtr = le_mem_ForceAlloc(UbiBlockPool);
         off_t offset, offInPeb;
         uint32_t peb;
@@ -2239,20 +2245,19 @@ le_result_t pa_flash_AdjustUbiSize
         }
         blockPtr = le_mem_ForceAlloc(UbiBlockPool);
 
-        if( reservedPebs == be32toh(descPtr->vtblPtr->reserved_pebs) )
-        {
-            res = LE_OK;
-            if (lastSize)
-            {
-                LE_DEBUG("Setting size %u for last peb on VolId %d", lastSize, descPtr->ubiVolumeId);
-                res = UpdateVidBlock( desc, reservedPebs - 1, blockPtr, reservedPebs, lastSize );
-            }
-        }
-        else
+        if( reservedPebs != be32toh(descPtr->vtblPtr->reserved_pebs) )
         {
             LE_DEBUG("Starting to reduce reserved_pebs for VolId %d", descPtr->ubiVolumeId);
             res = UpdateAllVidBlock( desc, blockPtr, reservedPebs, newSize );
         }
+        if (!lastSize)
+        {
+            lastSize = dataSize;
+        }
+
+        LE_DEBUG("Setting size %u for last peb on VolId %d", lastSize, descPtr->ubiVolumeId);
+        res = UpdateVidBlock( desc, reservedPebs - 1, blockPtr, reservedPebs, lastSize );
+
         if( LE_OK != res )
         {
             goto error;

@@ -1038,40 +1038,40 @@ le_result_t partition_OpenSwifotaPartition
             ctxPtr->phyBlock = 0;
             *fullImageCrc32Ptr = LE_CRC_START_CRC32;
             iblk = 0;
+
+            // Erase blocks
+            for (; iblk < FlashInfoPtr->nbLeb; iblk++)
+            {
+                bool isBad;
+
+                if ((LE_OK != (res = pa_flash_CheckBadBlock(MtdFd, iblk, &isBad)))
+                    && (res != LE_NOT_PERMITTED))
+                {
+                    LE_ERROR("Fails to check bad block %d", iblk);
+                    goto error;
+                }
+                if (isBad)
+                {
+                    LE_WARN("Skipping bad block %d", iblk);
+                }
+                else
+                {
+                    res = pa_flash_EraseBlock(MtdFd, iblk);
+                    if ((LE_OK != res) && (res != LE_NOT_PERMITTED))
+                    {
+                        LE_ERROR("Fails to erase block %d: res=%d", iblk, res);
+                        goto error;
+                    }
+                    if ((!ctxPtr->phyBlock) && (iblk >= ctxPtr->logicalBlock))
+                    {
+                        ctxPtr->phyBlock = iblk;
+                    }
+                }
+            }
         }
         else
         {
             iblk = offset / FlashInfoPtr->eraseSize + IMG_BLOCK_OFFSET;
-        }
-
-        // Erase blocks
-        for (; iblk < FlashInfoPtr->nbLeb; iblk++)
-        {
-            bool isBad;
-
-            if ((LE_OK != (res = pa_flash_CheckBadBlock(MtdFd, iblk, &isBad)))
-                && (res != LE_NOT_PERMITTED))
-            {
-                LE_ERROR("Fails to check bad block %d", iblk);
-                goto error;
-            }
-            if (isBad)
-            {
-                LE_WARN("Skipping bad block %d", iblk);
-            }
-            else
-            {
-                res = pa_flash_EraseBlock(MtdFd, iblk);
-                if ((LE_OK != res) && (res != LE_NOT_PERMITTED))
-                {
-                    LE_ERROR("Fails to erase block %d: res=%d", iblk, res);
-                    goto error;
-                }
-                if ((!ctxPtr->phyBlock) && (iblk >= ctxPtr->logicalBlock))
-                {
-                    ctxPtr->phyBlock = iblk;
-                }
-            }
         }
 
         if (LE_OK != pa_flash_SeekAtOffset(MtdFd,

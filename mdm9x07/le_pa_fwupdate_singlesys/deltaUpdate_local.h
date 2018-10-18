@@ -84,8 +84,22 @@ typedef struct
     size_t patchRemLen;                     ///< Expected remaining length of the patch when a patch
                                             ///< is crossing a chunk
     le_mem_PoolRef_t *poolPtr;              ///< Memory pool to use
+    bool* ubiVolumeCreatedPtr;              ///< True if the UBI volume has been created
+    bool reopenUbiVolume;                   ///< Request a reopening of the UBI volume
 }
 deltaUpdate_Ctx_t;
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * This function is used to resume delta update
+ *
+ */
+//--------------------------------------------------------------------------------------------------
+void deltaUpdate_ResumeCtx
+(
+    partition_Ctx_t* partCtxPtr,
+    deltaUpdate_Ctx_t* ctxPtr        ///< [IN] Delta update context
+);
 
 //--------------------------------------------------------------------------------------------------
 /**
