@@ -164,6 +164,8 @@ typedef struct
     char ubiVolName[128];    ///< UBI volume name in progress
     uint32_t ubiWriteLeb;    ///< Number of LEB written in the current UBI volume
     uint32_t ubiNbPeb;       ///< Total number of PEB belonging to the UBI partition
+    uint32_t ubiImageSeq;    ///< UBI image sequence number
+    bool isUbiImageSeq;      ///< true is UBI image sequence number is meaningfull
     uint8_t dataPtr[0];      ///< Buffer to copy data (size of an erase block)
 }
 Partition_t;
@@ -201,6 +203,8 @@ static void partition_Reset
     PartitionPtr->ubiVolType = 0;
     PartitionPtr->ubiWriteLeb = 0;
     PartitionPtr->ubiNbPeb = 0;
+    PartitionPtr->ubiImageSeq = 0;
+    PartitionPtr->isUbiImageSeq = false;
     memset(PartitionPtr->ubiVolName, 0, sizeof(PartitionPtr->ubiVolName));
 }
 
@@ -873,7 +877,10 @@ le_result_t partition_SetPartitionInternals
     {
         Partition_t pTmp;
         memcpy(&pTmp, PartitionPtr, sizeof(pTmp));
-        res = partition_OpenUbiSwifotaPartition( NULL, false, NULL );
+        res = partition_OpenUbiSwifotaPartition( NULL,
+                                                 PartitionPtr->ubiImageSeq,
+                                                 PartitionPtr->isUbiImageSeq,
+                                                 false, NULL );
         memcpy(PartitionPtr, &pTmp, sizeof(Partition_t));
     }
     return res;
@@ -1412,6 +1419,8 @@ error:
 le_result_t partition_OpenUbiSwifotaPartition
 (
     partition_Ctx_t *ctxPtr,          ///< [INOUT] Context
+    uint32_t ubiImageSeq,             ///< [IN] UBI image sequence number
+    bool isUbiImageSeq,               ///< [IN] true if the UBI image sequence number must be used
     bool forceCreate,                 ///< [IN] Force creation of a new UBI at offset
     bool *isFlashedPtr                ///< [OUT] True if flash write was done
 )
@@ -1424,6 +1433,19 @@ le_result_t partition_OpenUbiSwifotaPartition
     {
         LE_ERROR("pa_flash_Tell() fails: %d", res);
         return res;
+    }
+    if (isUbiImageSeq)
+    {
+        // Clear UBI image sequence number if it is passed as argument
+        PartitionPtr->isUbiImageSeq = false;
+        res = pa_flash_SetUbiImageSeqNum(MtdFd, ubiImageSeq, true);
+        if (LE_OK != res)
+        {
+            LE_ERROR("Failed to set UBI image sequence number %08x: %d", ubiImageSeq, res);
+            return LE_FAULT;
+        }
+        PartitionPtr->ubiImageSeq = ubiImageSeq;
+        PartitionPtr->isUbiImageSeq = true;
     }
     if( !forceCreate )
     {
@@ -1518,6 +1540,9 @@ le_result_t partition_CloseUbiSwifotaPartition
              PartitionPtr->ubiNbPeb, PartitionPtr->ubiOffset);
     PartitionPtr->ubiOffset = -1;
     PartitionPtr->ubiNbPeb = 0;
+    PartitionPtr->ubiImageSeq = 0;
+    PartitionPtr->isUbiImageSeq = false;
+    (void)pa_flash_SetUbiImageSeqNum(MtdFd, 0, false);
     res = pa_flash_Unscan(MtdFd);
     if( LE_OK != res )
     {

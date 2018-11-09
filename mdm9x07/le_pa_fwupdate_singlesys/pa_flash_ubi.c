@@ -487,7 +487,12 @@ static void CreateEcHeader
     ecHdrPtr->version = UBI_VERSION;
     ecHdrPtr->vid_hdr_offset = htobe32(infoPtr->writeSize);
     ecHdrPtr->data_offset = htobe32(2 * infoPtr->writeSize);
-    ecHdrPtr->image_seq = htobe32(UBI_IMAGE_SEQ_BASE);
+    if( !descPtr->isUbiImageSeq )
+    {
+        descPtr->ubiImageSeq = UBI_IMAGE_SEQ_BASE;
+        descPtr->isUbiImageSeq = true;
+    }
+    ecHdrPtr->image_seq = htobe32(descPtr->ubiImageSeq);
     crc = le_crc_Crc32( (uint8_t *)ecHdrPtr, UBI_EC_HDR_SIZE_CRC, LE_CRC_START_CRC32 );
     ecHdrPtr->hdr_crc = htobe32(crc);
 
@@ -989,6 +994,13 @@ static le_result_t ReadEcHeader
         LE_ERROR( "Bad CRC at %lx: Calculated %x, received %x",
                   physEraseBlock, crc, be32toh(ecHeaderPtr->hdr_crc));
         return LE_FAULT;
+    }
+    pa_flash_MtdDesc_t *descPtr = (pa_flash_MtdDesc_t *)desc;
+    if( !descPtr->isUbiImageSeq )
+    {
+        descPtr->ubiImageSeq = be32toh(ecHeaderPtr->image_seq);
+        descPtr->isUbiImageSeq = true;
+        LE_DEBUG("UBI image seq number set to %0x", descPtr->ubiImageSeq);
     }
 
     LE_DEBUG("PEB %lx : MAGIC %c%c%c%c, EC %"PRIu64", VID %x DATA %x CRC %x",
@@ -2696,6 +2708,39 @@ error:
         le_mem_Release(blockPtr);
     }
     return res;
+}
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Set UBI image sequence number. Use 0 to "reset" the counter to the default value
+ *
+ * @return
+ *      - LE_OK            On success
+ *      - LE_BAD_PARAMETER If desc is NULL or is not a valid descriptor
+ *      - LE_BUSY          If UBI image sequence number is already set
+ */
+//--------------------------------------------------------------------------------------------------
+le_result_t pa_flash_SetUbiImageSeqNum
+(
+    pa_flash_Desc_t desc,         ///< [IN] Private flash descriptor
+    uint32_t        ubiImageSeq,  ///< [IN] UBI image sequence number
+    bool            isUbiImageSeq ///< [IN] true if UBI image sequence number is meaningfull
+)
+{
+    pa_flash_MtdDesc_t *descPtr = (pa_flash_MtdDesc_t *)desc;
+
+    if( (!descPtr) || (descPtr->magic != desc) )
+    {
+        return LE_BAD_PARAMETER;
+    }
+
+    if( descPtr->isUbiImageSeq && isUbiImageSeq )
+    {
+        return LE_BUSY;
+    }
+    descPtr->ubiImageSeq = ubiImageSeq;
+    descPtr->isUbiImageSeq = isUbiImageSeq;
+    return LE_OK;
 }
 
 //--------------------------------------------------------------------------------------------------

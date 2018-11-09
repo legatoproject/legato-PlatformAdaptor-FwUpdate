@@ -242,7 +242,7 @@ static void Test_pa_flash_WriteDeltaCwe
     LE_TEST(LE_OK == res);
     wrOff += sz;
 
-    res = partition_OpenUbiSwifotaPartition(&ctx, true, &iswr);
+    res = partition_OpenUbiSwifotaPartition(&ctx, 0xABCD0001, true, true, &iswr);
     LE_TEST(LE_OK == res);
 
     res = partition_OpenUbiVolumeSwifotaPartition(&ctx, 0, PA_FLASH_VOLUME_STATIC,
@@ -277,7 +277,7 @@ static void Test_pa_flash_WriteDeltaCwe
     LE_TEST(LE_OK == res);
     wrOff += sz;
 
-    res = partition_OpenUbiSwifotaPartition(&ctx, true, &iswr);
+    res = partition_OpenUbiSwifotaPartition(&ctx, 0xABCD0002, true, true, &iswr);
     LE_TEST(LE_OK == res);
 
     res = partition_OpenUbiVolumeSwifotaPartition(&ctx, 1, PA_FLASH_VOLUME_DYNAMIC,
@@ -591,7 +591,7 @@ static void Test_pa_flash_ResumeWriteDeltaCwe
     wrOff += sz;
     memcpy(part, partPtr, partSize);
 
-    res = partition_OpenUbiSwifotaPartition(&ctx, true, &iswr);
+    res = partition_OpenUbiSwifotaPartition(&ctx, 0xABCD0001, true, true, &iswr);
     LE_TEST(LE_OK == res);
 
     res = partition_OpenUbiVolumeSwifotaPartition(&ctx, 0, PA_FLASH_VOLUME_STATIC,
@@ -629,7 +629,7 @@ static void Test_pa_flash_ResumeWriteDeltaCwe
     wrOff += sz;
     memcpy(part, partPtr, partSize);
 
-    res = partition_OpenUbiSwifotaPartition(&ctx, true, &iswr);
+    res = partition_OpenUbiSwifotaPartition(&ctx, 0xABCD0002, true, true, &iswr);
     LE_TEST(LE_OK == res);
 
     res = partition_OpenUbiVolumeSwifotaPartition(&ctx, 1, PA_FLASH_VOLUME_DYNAMIC,
@@ -655,7 +655,7 @@ static void Test_pa_flash_ResumeWriteDeltaCwe
     res = partition_SetPartitionInternals((void*)part);
     LE_TEST(LE_OK == res);
     LE_ASSERT(LE_OK == res);
-    res = partition_OpenUbiSwifotaPartition(&ctx, false, &iswr);
+    res = partition_OpenUbiSwifotaPartition(&ctx, 0, false, false, &iswr);
     LE_TEST(LE_OK == res);
     LE_ASSERT(LE_OK == res);
     res = partition_OpenUbiVolumeSwifotaPartition(&ctx, 1, PA_FLASH_VOLUME_DYNAMIC,

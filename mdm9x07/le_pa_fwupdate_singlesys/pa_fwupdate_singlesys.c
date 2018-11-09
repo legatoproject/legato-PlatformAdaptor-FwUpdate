@@ -1451,7 +1451,30 @@ static le_result_t ParseAndStoreData
         {
             if (PATCH_META_HEADER_SIZE == length)
             {
-                return ParsePatchMetaHeaders(length, chunkPtr, resumeCtxPtr);
+                result = ParsePatchMetaHeaders(length, chunkPtr, resumeCtxPtr);
+
+
+                if ((LE_OK == result) &&
+                    (resumeCtxPtr->saveCtx.patchMetaHdr.ubiVolId == 0) &&
+                    deltaUpdate_IsImgPatch(CurrentCweHeader.imageType))
+                {
+                    // Patch Meta is read, hence we get the ubi sequence number. Now UBI partition
+                    // can be created with ubi sequence number.
+
+                    // Set UBI image seq number to any value and its validity to false. This will
+                    // force the UBI layer to take the default UBI image sequence number.
+                    // If an UBI image seq number is present inside the delta patch meta data,
+                    // set the value and its validity to true.
+                    if (LE_OK != partition_OpenUbiSwifotaPartition(&PartitionCtx,
+                                                   resumeCtxPtr->saveCtx.patchMetaHdr.patchInfo,
+                                                   true, true, NULL))
+                    {
+                        LE_ERROR("Failed to create ubi partition inside swifota");
+                        return LE_FAULT;
+                    }
+                }
+
+                return result;
             }
             else
             {
@@ -1505,15 +1528,6 @@ static le_result_t ParseAndStoreData
                  return LE_FAULT;
              }
 
-             if (deltaUpdate_IsImgPatch(CurrentCweHeader.imageType))
-             {
-
-                 if (LE_OK != partition_OpenUbiSwifotaPartition(&PartitionCtx, true, NULL))
-                 {
-                     LE_ERROR("Failed to create ubi partition inside swifota");
-                     return LE_FAULT;
-                 }
-            }
         }
         else if (WriteCweHeader(&CurrentCweHeader, chunkPtr, length, &tmpLen, resumeCtxPtr))
         {

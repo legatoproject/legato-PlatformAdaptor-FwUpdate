@@ -37,6 +37,8 @@ typedef struct
     off_t ubiAbsOffset;      ///< Absolute offset for UBI
     off_t ubiOffsetInPeb;    ///< Offset in block for UBI
     uint32_t ubiBasePeb;     ///< Base PEB for UBI
+    uint32_t ubiImageSeq;    ///< UBI image sequence number
+    bool isUbiImageSeq;      ///< true if UBI image sequence number is meaningfull
 }
 pa_flash_MtdDesc_t;
 
@@ -157,6 +159,23 @@ LE_SHARED le_result_t pa_flash_ScanUbiAtOffset
     pa_flash_Desc_t desc,     ///< [IN] Private flash descriptor
     off_t           offset,   ///< [IN]  Base offset for the UBI
     uint32_t        ubiVolId  ///< [IN] UBI volume ID
+);
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Set UBI image sequence number. Use 0 to "reset" the counter to the default value
+ *
+ * @return
+ *      - LE_OK            On success
+ *      - LE_BAD_PARAMETER If desc is NULL or is not a valid descriptor
+ *      - LE_BUSY          If UBI image sequence number is already set
+ */
+//--------------------------------------------------------------------------------------------------
+LE_SHARED le_result_t pa_flash_SetUbiImageSeqNum
+(
+    pa_flash_Desc_t desc,         ///< [IN] Private flash descriptor
+    uint32_t        ubiImageSeq,  ///< [IN] UBI image sequence number
+    bool            isUbiImageSeq ///< [IN] true if UBI image sequence number is meaningfull
 );
 
 //--------------------------------------------------------------------------------------------------
