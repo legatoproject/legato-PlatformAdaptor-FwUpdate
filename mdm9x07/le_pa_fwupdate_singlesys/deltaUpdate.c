@@ -483,7 +483,7 @@ le_result_t deltaUpdate_LoadPatchMetaHeader
         // Copy patch meta header and take care of byte order BIG endian vs LITTLE endian
         memcpy( &hdpPtr->diffType, startPtr, sizeof(hdpPtr->diffType) );
         deltaUpdate_PatchMetaHdr_t* tmpPtr = (deltaUpdate_PatchMetaHdr_t*)startPtr;
-        hdpPtr->segmentSize = be32toh(tmpPtr->segmentSize);
+        hdpPtr->patchInfo = be32toh(tmpPtr->patchInfo);
         hdpPtr->numPatches = be32toh(tmpPtr->numPatches);
         hdpPtr->ubiVolId = be16toh(tmpPtr->ubiVolId);
         hdpPtr->ubiVolType = tmpPtr->ubiVolType;
@@ -493,8 +493,8 @@ le_result_t deltaUpdate_LoadPatchMetaHeader
         hdpPtr->destSize = be32toh(tmpPtr->destSize);
         hdpPtr->destCrc32 = be32toh(tmpPtr->destCrc32);
 
-        LE_INFO("Meta Header: SegSz 0x%X NumPtch %u UbiVolId %hu Type %hhu Flags %hhX",
-                hdpPtr->segmentSize, hdpPtr->numPatches, hdpPtr->ubiVolId,
+        LE_INFO("Meta Header: PatchInfo/SegSz 0x%X NumPtch %u UbiVolId %hu Type %hhu Flags %hhX",
+                hdpPtr->patchInfo, hdpPtr->numPatches, hdpPtr->ubiVolId,
                 hdpPtr->ubiVolType, hdpPtr->ubiVolFlags);
         LE_INFO("OrigSz %u OrigCrc 0x%X DestSz %u DestCrc 0x%X",
                 hdpPtr->origSize, hdpPtr->origCrc32, hdpPtr->destSize, hdpPtr->destCrc32);
@@ -908,7 +908,7 @@ le_result_t deltaUpdate_ApplyPatch
                 patchHdrPtr->number, patchHdrPtr->size, patchHdrPtr->offset);
 
         // Fill the patch context for origin and destination images
-        ctx.segmentSize = patchMetaHdrPtr->segmentSize;
+        ctx.segmentSize = patchMetaHdrPtr->patchInfo;
         ctx.patchOffset = patchHdrPtr->offset;
 
         ctx.origImage = PA_PATCH_IMAGE_RAWFLASH;

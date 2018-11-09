@@ -40,7 +40,12 @@
 typedef struct
 {
     uint8_t  diffType[16];    ///< Patch diff magic signature
-    uint32_t segmentSize;     ///< Segment size for every slices. May be device dependant
+
+    uint32_t patchInfo;       ///< Based on diffType it carries different info.
+                              ///<      Patch-segment-size --> if diff type BSDIFF
+                              ///<      Ubi-seq-num --> if diff type IMGDIFF and target is ubi-image
+                              ///<      Don't-care  --> otherwise
+
     uint32_t numPatches;      ///< Number of patch slices
     uint16_t ubiVolId;        ///< UBI Vol Id. Set to -1 if not used.
     uint8_t  ubiVolType;      ///< UBI Vol type. Set to -1 if not used.

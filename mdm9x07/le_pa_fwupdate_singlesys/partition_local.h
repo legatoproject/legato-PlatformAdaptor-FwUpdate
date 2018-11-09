@@ -299,6 +299,8 @@ le_result_t partition_WriteSwifotaPartition
 le_result_t partition_OpenUbiSwifotaPartition
 (
     partition_Ctx_t *ctxPtr,          ///< [INOUT] Context
+    uint32_t ubiImageSeq,             ///< [IN] UBI image sequence number (0 for default)
+    bool isUbiImageSeq,               ///< [IN] true if the UBI image sequence number must be used
     bool forceCreate,                 ///< [IN] Force creation of new UBI partition
     bool *isFlashedPtr                ///< [OUT] True if flash write was done
 );
