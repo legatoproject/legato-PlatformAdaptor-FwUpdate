@@ -295,8 +295,11 @@ static void Testpa_fwupdate_Download
     close(pip[0]);
     waitpid(pid, &status, 0);
     // Perform the swap and request a mark good
-    ApplySwap();
-    pa_fwupdate_MarkGood();
+    if (suspendAtOffset == 0)
+    {
+        ApplySwap();
+        pa_fwupdate_MarkGood();
+    }
 
     // Resume the previous download if it has been suspended
     if (suspendAtOffset != 0)
@@ -357,6 +360,7 @@ static void Testpa_fwupdate_Download
 
     // Perform the swap
     ApplySwap();
+    pa_fwupdate_MarkGood();
 }
 
 //--------------------------------------------------------------------------------------------------

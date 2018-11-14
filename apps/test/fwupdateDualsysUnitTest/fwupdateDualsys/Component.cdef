@@ -5,6 +5,16 @@ requires:
         le_fwupdate.api         [types-only]
         le_flash.api            [types-only]
     }
+    component:
+    {
+        ${LEGATO_ROOT}/components/3rdParty/openssl
+    }
+
+    lib:
+    {
+        ssl
+        crypto
+    }
 }
 
 cflags:
@@ -21,11 +31,18 @@ cflags:
     -Dwrite=sys_flashWrite
     -Dopendir=sys_flashOpendir
     -Dsystem=sys_flashSystem
+    -Daccess=sys_flashAccess
+    -Dunlink=sys_flashUnlink
 }
 
 ldflags:
 {
     -lbz2
+}
+
+ldflags:
+{
+    -lssl
 }
 
 sources:

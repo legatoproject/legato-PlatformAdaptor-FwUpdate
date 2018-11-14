@@ -16,6 +16,7 @@
 #undef unlink
 #undef rename
 #undef system
+#undef access
 
 #include <stdio.h>
 #include <limits.h>
@@ -40,6 +41,7 @@
 #define PROC_MTD_PATH          "/proc/mtd"
 #define DEV_MTD_PATH           "/dev/mtd"
 #define SYS_FLASH_PREFIX       "/tmp/sys_flash"
+#define LEGATO_PATH            "/legato"
 
 //--------------------------------------------------------------------------------------------------
 /**
@@ -149,6 +151,7 @@ static char *sys_FlashBuildPathName
     if( strncmp(SYS_CLASS_UBI_PATH, pathname, 14) == 0 ||
         strncmp(SYS_CLASS_MTD_PATH, pathname, 14) == 0 ||
         strcmp(PROC_MTD_PATH, pathname) == 0 ||
+        strncmp(LEGATO_PATH, pathname, 7) == 0 ||
         strncmp(DEV_MTD_PATH, pathname, 8) == 0 )
     {
         snprintf(SysFlashPathname, sizeof(SysFlashPathname), SYS_FLASH_PREFIX "%s", pathname);
@@ -335,6 +338,24 @@ int sys_flashOpen
 
 //--------------------------------------------------------------------------------------------------
 /**
+ * Check the existence of an entry
+ *
+ * @return   (errno)
+ *      - >= 0         On success
+ *      - -1           The access(2) has failed (errno set by write(2))
+ */
+//--------------------------------------------------------------------------------------------------
+int sys_flashAccess
+(
+    const char *namePtr,
+    int mode
+)
+{
+    return access(sys_FlashBuildPathName(namePtr), mode);
+}
+
+//--------------------------------------------------------------------------------------------------
+/**
  * Write to a partition or to a file.
  *
  * @return   (errno)
@@ -473,6 +494,11 @@ int sys_flashSystem
     {
         return system(command);
     }
+    else if (0 == strncmp(command, "/legato/systems/current/bin/cus_sec.sh", 38))
+    {
+        LE_INFO("Result: %s", command);
+        return 0;
+    }
     return 0x6400;
 }
 
@@ -508,6 +534,14 @@ COMPONENT_INIT
 
     // Create directories for /sys/class/mtd entries
     rc = system("mkdir -p " SYS_FLASH_PREFIX SYS_CLASS_MTD_PATH);
+    if( WEXITSTATUS(rc) )
+    {
+        LE_ERROR("system() failed: %d", rc);
+        exit(EXIT_FAILURE);
+    }
+
+    // Create directories for /legato entries
+    rc = system("mkdir -p " SYS_FLASH_PREFIX LEGATO_PATH);
     if( WEXITSTATUS(rc) )
     {
         LE_ERROR("system() failed: %d", rc);

@@ -24,7 +24,8 @@
 #include <sys/stat.h>
 #include <netinet/in.h>
 #include "flash-ubi.h"
-
+#include <openssl/sha.h>
+#include <openssl/err.h>
 
 //--------------------------------------------------------------------------------------------------
 /**
@@ -39,6 +40,13 @@
  */
 //--------------------------------------------------------------------------------------------------
 #define EFS_DWL_STATUS_FILE "/fwupdate/dwl_status.nfo"
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Path to save CUSG image
+ */
+//--------------------------------------------------------------------------------------------------
+static char* CusgPathPtr = NULL;
 
 //--------------------------------------------------------------------------------------------------
 /**
@@ -136,6 +144,7 @@ typedef struct
     bool     isImageToBeRead;       ///< Boolean to know if data concerns header or component image
     deltaUpdate_PatchMetaHdr_t patchMetaHdr;    ///< Patch Meta Header
     deltaUpdate_PatchHdr_t     patchHdr;        ///< Patch Header
+    SHA256_CTX sha256Ctx;           ///< buffer to save sha256 context
     uint32_t ctxCrc;                ///< context CRC, Computed on all previous fields of this struct
 }
 ResumeCtxSave_t;
@@ -149,6 +158,7 @@ typedef struct
 {
     ResumeCtxSave_t saveCtx;    ///< context to save
     uint32_t fileIndex;         ///< file index to use to save the above context [0..1]
+    SHA256_CTX  *sha256CtxPtr;  ///< sha256 context pointer used for calculating
 }
 ResumeCtx_t;
 
@@ -418,6 +428,193 @@ static le_result_t EraseResumeCtx
 
     LE_DEBUG("result %s", LE_RESULT_TXT(result));
     return result;
+}
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Print OpenSSL errors of SHA256 calculation
+ */
+//--------------------------------------------------------------------------------------------------
+static void PrintOpenSSLErrors
+(
+    void
+)
+{
+    char errorString[128] = {0};
+    unsigned long error;
+
+    // Retrieve the first error and remove it from the queue
+    error = ERR_get_error();
+    while (0 != error)
+    {
+        // Convert the error code to a human-readable string and print it
+        ERR_error_string_n(error, errorString, sizeof(errorString));
+        LE_ERROR("%s", errorString);
+
+        // Retrieve the next error and remove it from the queue
+        error = ERR_get_error();
+    }
+}
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Init the SHA256 context pointer
+ *
+ * @return
+ *      - LE_OK             on success
+ *      - LE_FAULT          on failure
+ *      - LE_BAD_PARAMETER  on parameter invalid
+ */
+//--------------------------------------------------------------------------------------------------
+static le_result_t StartSha256
+(
+    SHA256_CTX** sha256CtxPtr    ///< [INOUT] SHA1 context pointer
+)
+{
+    static SHA256_CTX sha256Ctx;
+    // Check if SHA256 context pointer is set
+    if (!sha256CtxPtr)
+    {
+        LE_ERROR("No SHA256 context pointer");
+        return LE_BAD_PARAMETER;
+    }
+
+    // Load the error strings
+    ERR_load_crypto_strings();
+
+    // Initialize the SHA256 context
+    // SHA256_Init function returns 1 for success, 0 otherwise
+    if (1 != SHA256_Init(&sha256Ctx))
+    {
+        LE_ERROR("SHA256_Init failed");
+        PrintOpenSSLErrors();
+        return LE_FAULT;
+    }
+    else
+    {
+        *sha256CtxPtr = &sha256Ctx;
+        return LE_OK;
+    }
+}
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Hash input data buffer and update SHA256 digest.
+ *
+ * @return
+ *      - LE_OK             on success
+ *      - LE_FAULT          on failure
+ *      - LE_BAD_PARAMETER  on parameter invalid
+ */
+//--------------------------------------------------------------------------------------------------
+static le_result_t ProcessSha256
+(
+    SHA256_CTX*    sha256CtxPtr,     ///< [IN] SHA256 context pointer
+    uint8_t* bufPtr,                 ///< [IN] Data buffer to hash
+    size_t   len                     ///< [IN] Data buffer length
+)
+{
+    // Check if pointers are set
+    if ((!sha256CtxPtr) || (!bufPtr))
+    {
+        printf("NULL pointer provided\n");
+        return LE_BAD_PARAMETER;
+    }
+
+    // Update SHA256 digest
+    // SHA256_Update function returns 1 for success, 0 otherwise
+    if (1 != SHA256_Update(sha256CtxPtr, bufPtr, len))
+    {
+        printf("SHA256_Update failed\n");
+        PrintOpenSSLErrors();
+        return LE_FAULT;
+    }
+
+    return LE_OK;
+}
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Finish the SHA256 calculation and get the digest
+ *
+ * @return
+ *      - LE_OK             on success
+ *      - LE_FAULT          on failure
+ *      - LE_BAD_PARAMETER  on parameter invalid
+ */
+//--------------------------------------------------------------------------------------------------
+static le_result_t EndSha256
+(
+    SHA256_CTX* sha256CtxPtr,     ///< [IN] SHA256 context pointer
+    unsigned char * digestBuf,    ///< [INOUT] SHA256 digest buffer pointer
+    size_t bufSize                ///< [IN] SHA256 digest buffer size
+)
+{
+    // Check if pointers are set
+    if ((!sha256CtxPtr) || (!digestBuf))
+    {
+        LE_ERROR("Null pointer provided");
+        return LE_BAD_PARAMETER;
+    }
+
+    // Check buffer length
+    if (bufSize < SHA256_DIGEST_LENGTH)
+    {
+        LE_ERROR("Buffer is too short (%zu < %d)", bufSize, SHA256_DIGEST_LENGTH);
+        return LE_BAD_PARAMETER;
+    }
+
+    if (1 != SHA256_Final(digestBuf, sha256CtxPtr))
+    {
+        printf("SHA256_Final failed\n");
+        PrintOpenSSLErrors();
+        return LE_FAULT;
+    }
+
+    return LE_OK;
+}
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Restore the SHA256 context
+ *
+ * @return
+ *      - LE_OK             on success
+ *      - LE_FAULT          on failure
+ *      - LE_BAD_PARAMETER  on parameter invalid
+ */
+//--------------------------------------------------------------------------------------------------
+static le_result_t RestoreSha256
+(
+    SHA256_CTX*  bufPtr,         ///< [IN] SHA256 context Buffer to restore
+    size_t bufSize,              ///< [IN] SHA256 context Buffer size
+    SHA256_CTX** sha256CtxPtr    ///< [INOUT] SHA256 context pointer
+)
+{
+    // Check if pointers are set
+    if ((!sha256CtxPtr) || (!bufPtr))
+    {
+        LE_ERROR("Null pointer provided");
+        return LE_BAD_PARAMETER;
+    }
+
+    // Check buffer length
+    if (bufSize < sizeof(SHA256_CTX))
+    {
+        LE_ERROR("Buffer is too short (%zu < %zd)", bufSize, sizeof(SHA256_CTX));
+        return LE_BAD_PARAMETER;
+    }
+
+    // Initialize SHA256 context
+    if (LE_OK != StartSha256(sha256CtxPtr))
+    {
+        LE_ERROR("Unable to initialize SHA256 context");
+        return LE_FAULT;
+    }
+
+    // Restore the SHA256 context
+    memcpy(*sha256CtxPtr, bufPtr, sizeof(SHA256_CTX));
+    return LE_OK;
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -704,6 +901,110 @@ static le_result_t WriteNvup
 
 //--------------------------------------------------------------------------------------------------
 /**
+ * Write CUSG image into CusgPathPtr
+ *
+ * @return
+ *      - LE_OK             on success
+ *      - LE_FAULT          on failure
+ */
+//--------------------------------------------------------------------------------------------------
+static le_result_t WriteCusg
+(
+    const cwe_Header_t* hdrPtr,   ///< [IN] Component image header
+    size_t length,                ///< [IN] Input data length
+    size_t offset,                ///< [IN] Data offset in the package
+    const uint8_t* dataPtr,       ///< [IN] Input data
+    bool forceClose,              ///< [IN] Force close of device and resources
+    bool *isFlashedPtr            ///< [OUT] True if flash write was done
+)
+{
+    // Create a new file containing the patch body
+    static int cusgFd = -1;
+    int writeTry = 5;
+    int writeLength = 0;
+    int writeResult = 0;
+
+    if (forceClose)
+    {
+        return LE_OK;
+    }
+
+    if (-1 == cusgFd)
+    {
+        cusgFd = open(CusgPathPtr, O_TRUNC | O_CREAT | O_WRONLY, S_IRUSR | S_IWUSR);
+
+        if (-1 == cusgFd)
+        {
+            LE_CRIT("Failed to create CUSG image: %m");
+            goto error;
+        }
+    }
+
+    LE_DEBUG("Download length %zu offset %zu total %"PRIu32"", length, offset, hdrPtr->imageSize);
+
+    //bypass download failed.
+    if (0 == length)
+    {
+        return LE_OK;
+    }
+
+    while(writeTry > 0)
+    {
+        writeResult = write(cusgFd, dataPtr+writeLength, length-writeLength);
+        if (writeResult < 0)
+        {
+            if(EINTR == errno)
+            {
+                LE_ERROR("Write to image file interrupted, retry: %m");
+            }
+            else
+            {
+                LE_ERROR("Write to image file failed: %m");
+                writeTry = 0;
+                break;
+            }
+        }
+        else
+        {
+            writeLength += writeResult;
+            if (writeLength == length)
+            {
+                //write length bytes finish
+                break;
+            }
+        }
+        writeTry--;
+    }
+
+    if(0 == writeTry)
+    {
+        LE_ERROR("Write %zu bytes to image file fails: %m", length);
+        close(cusgFd);
+        unlink(CusgPathPtr);
+        cusgFd = -1;
+        goto error;
+    }
+
+    if ((length + offset) >= hdrPtr->imageSize)
+    {
+        LE_INFO("Write finish");
+        close(cusgFd);
+        cusgFd = -1;
+
+        if (isFlashedPtr)
+        {
+            *isFlashedPtr = true;
+        }
+    }
+
+    return LE_OK;
+
+error:
+    return LE_FAULT;
+}
+
+//--------------------------------------------------------------------------------------------------
+/**
  * Write data in a partition
  *
  * @return
@@ -744,6 +1045,11 @@ static le_result_t WriteData
         case CWE_IMAGE_TYPE_SBL1:
             ret = partition_WriteDataSBL(&PartitionCtx, length, offset, dataPtr, forceClose,
                                          isFlashedPtr);
+            break;
+
+        //save the CUSG image as a file
+        case CWE_IMAGE_TYPE_CUSG:
+            ret = WriteCusg(hdrPtr, length, offset, dataPtr, forceClose, isFlashedPtr);
             break;
 
         default:
@@ -788,6 +1094,8 @@ static void InitParameters
         CurrentCweHeader.crc32 = saveCtxPtr->imageCrc;
         CurrentCweHeader.miscOpts = saveCtxPtr->miscOpts;
         IsFirstDataWritten = true;
+        RestoreSha256(&(saveCtxPtr->sha256Ctx), sizeof(saveCtxPtr->sha256Ctx),
+                      &ResumeCtx.sha256CtxPtr);
     }
     else
     {
@@ -893,6 +1201,15 @@ static size_t WriteImageData
         static size_t LenToFlash = 0;
         ResumeCtxSave_t *saveCtxPtr = &resumeCtxPtr->saveCtx;
 
+        if(!resumeCtxPtr->sha256CtxPtr)
+        {
+            if (LE_OK != StartSha256(&resumeCtxPtr->sha256CtxPtr))
+            {
+                LE_ERROR("Unable to initialize SHA256 context");
+                return 0;
+            }
+        }
+
         // There are 3 cases where (saveCtxPtr->currentOffset == CurrentImageOffset):
         // 1. Data actually written to the flash and ResumeCtx updated (isFlashed == true)
         // 2. New download case, set in InitParameters()
@@ -922,6 +1239,17 @@ static size_t WriteImageData
             LenToFlash += length;
             result = length;
 
+            if ((cweHeaderPtr->imageType != CWE_IMAGE_TYPE_CUSG)
+             && (cweHeaderPtr->imageType != CWE_IMAGE_TYPE_FILE))
+            {
+                // SHA256 digest is updated with all image data
+                if (LE_OK != ProcessSha256(resumeCtxPtr->sha256CtxPtr,(uint8_t*)chunkPtr, length))
+                {
+                    LE_ERROR("Unable to update SHA256 digest");
+                    return 0;
+                }
+            }
+
             LE_DEBUG ("CurrentImageOffset %zu", CurrentImageOffset);
             if (isFlashed)
             {// some data have been flashed => update the resume context
@@ -939,6 +1267,11 @@ static size_t WriteImageData
                 saveCtxPtr->totalRead += LenToFlash;
                 LenToFlash = 0;
                 saveCtxPtr->currentOffset = CurrentImageOffset;
+
+                //save new ctx to buf before update resume ctx
+                memcpy(&(saveCtxPtr->sha256Ctx), resumeCtxPtr->sha256CtxPtr,
+                    sizeof(saveCtxPtr->sha256Ctx));
+
                 ret = UpdateResumeCtx(resumeCtxPtr);
                 if (ret != LE_OK)
                 {
@@ -2208,6 +2541,135 @@ void pa_fwupdate_Reset
 
 //--------------------------------------------------------------------------------------------------
 /**
+ * Save the customer security check script result
+ *
+ * @return
+ *      - LE_OK             on success
+ *      - LE_FAULT          on failure
+ */
+//--------------------------------------------------------------------------------------------------
+static le_result_t SaveCustResult
+(
+    uint8_t secCheckResult    ///< [IN] Customer security check result
+)
+{
+    le_result_t result;
+    le_fs_FileRef_t resFileRef;
+    char * filePath = "/cus_sec_result";
+
+    result = le_fs_Open(filePath, LE_FS_WRONLY | LE_FS_CREAT, &resFileRef);
+    if (LE_OK != result)
+    {
+        LE_ERROR("failed to open %s: %s", filePath, LE_RESULT_TXT(result));
+        return result;
+    }
+
+    result = le_fs_Write(resFileRef, &secCheckResult, sizeof(secCheckResult));
+    if (LE_OK != result)
+    {
+        LE_ERROR("failed to write %s: %s", filePath, LE_RESULT_TXT(result));
+        if (LE_OK != le_fs_Close(resFileRef))
+        {
+            LE_ERROR("failed to close %s", filePath);
+        }
+        return result;
+    }
+
+    result = le_fs_Close(resFileRef);
+    if (LE_OK != result)
+    {
+        LE_ERROR("failed to close %s: %s", filePath, LE_RESULT_TXT(result));
+    }
+
+    return result;
+}
+
+//--------------------------------------------------------------------------------------------------
+/**
+ * Execute the customer security check script and save the result
+ *
+ * @return
+ *      - LE_OK             on success
+ *      - LE_FAULT          on failure
+ */
+//--------------------------------------------------------------------------------------------------
+static le_result_t CustSecCheck
+(
+    const char* filePathPtr,          ///< [IN] File path pointer of CUSG image
+    const char* digestCharBufPtr,     ///< [IN] Digest buffer
+    size_t digestBufLength            ///< [IN] Digest buffer length
+)
+{
+    pid_t cusStatus;
+    char secCmd[PATH_MAX];
+    le_result_t result = LE_OK;
+
+    if (access(filePathPtr, F_OK) < 0)
+    {
+        LE_INFO("No CUSG image, skip cus check.");
+        return result;
+    }
+
+    //reserve 400 bytes for script path and CUSG image path
+    if (digestBufLength > (PATH_MAX - 400))
+    {
+        LE_ERROR("Digest buffer too large to handle.");
+        return LE_FAULT;
+    }
+
+    snprintf(secCmd, sizeof(secCmd), "/legato/systems/current/bin/cus_sec.sh %s %s",
+        filePathPtr, digestCharBufPtr);
+
+    // Execute the program.
+    cusStatus = system(secCmd);
+
+    //delete the CUSG file
+    if (unlink(filePathPtr) == -1)
+    {
+        LE_ERROR("Could not unlink CUSG file. Reason, %s (%d).", strerror(errno), errno);
+    }
+
+    if(-1 == cusStatus)
+    {
+        LE_ERROR("No cus check script.");
+        return result;
+    }
+
+    if(WIFEXITED(cusStatus))
+    {
+        LE_INFO("Exit status = [%d]\n", WEXITSTATUS(cusStatus));
+        if (0 == WEXITSTATUS(cusStatus))
+        {
+            LE_INFO("CustSecCheck successed.");
+        }
+        else
+        {
+            LE_ERROR("CustSecCheck failed.");
+            result = LE_FAULT;
+        }
+    }
+    else
+    {
+        LE_ERROR("Run cus check script failed.");
+        result = LE_FAULT;
+        return result;
+    }
+
+    //save the result of the hook app
+    if(LE_OK != SaveCustResult(WEXITSTATUS(cusStatus)))
+    {
+        LE_ERROR("Save CustSecCheck result failed.");
+        result = LE_FAULT;
+    }
+    else
+    {
+        LE_INFO("Cus check result saved.");
+    }
+    return result;
+}
+
+//--------------------------------------------------------------------------------------------------
+/**
  * This function starts a package download to the device.
  *
  * @warning This API is a blocking API. It needs to be called in a dedicated thread.
@@ -2399,6 +2861,38 @@ le_result_t pa_fwupdate_Download
             else
             {
                 LE_INFO("End of download");
+
+                unsigned char sha256DigestBuf[SHA256_DIGEST_LENGTH];
+                char sha256CharBuf[SHA256_DIGEST_LENGTH*2+1];
+                int i;
+                memset(sha256DigestBuf, 0, sizeof(sha256DigestBuf));
+                memset(sha256CharBuf, 0, sizeof(sha256CharBuf));
+
+                if(LE_OK != EndSha256(ResumeCtx.sha256CtxPtr,sha256DigestBuf,
+                    SHA256_DIGEST_LENGTH))
+                {
+                    LE_ERROR("Failed ending sha256");
+                    goto error;
+                }
+
+                //convert digest to char
+                for(i = 0; i < SHA256_DIGEST_LENGTH; i++)
+                {
+                    snprintf(&sha256CharBuf[i*2], sizeof(sha256CharBuf) - (i*2),
+                        "%02X", sha256DigestBuf[i]);
+                }
+
+                if(LE_OK != CustSecCheck(CusgPathPtr, (const char*)sha256CharBuf,
+                    sizeof(sha256CharBuf)))
+                {
+                    LE_ERROR("Customer sec check failed");
+                    goto error;
+                }
+                else
+                {
+                    LE_INFO("Customer sec check passed.");
+                }
+
                 if (saveCtxPtr->globalCrc != saveCtxPtr->currentGlobalCrc)
                 {
                     LE_ERROR("Bad global CRC check");
@@ -2954,6 +3448,18 @@ COMPONENT_INIT
     }
 
     CheckSyncAtStartup();
+
+    //Use different path to save CUSG image for RO and RW system
+    if (0 == access("/legato/systems/current/read-only", F_OK))
+    {
+        LE_INFO("In read-only system.");
+        CusgPathPtr = "/tmp/cusgimage";
+    }
+    else
+    {
+        LE_INFO("In read-write system.");
+        CusgPathPtr = "/legato/cusgimage";
+    }
 
     if (GetResumeCtx(&ResumeCtx) != LE_OK)
     {

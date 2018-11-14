@@ -39,4 +39,5 @@ cflags:
 ldflags:
 {
     -lbz2
+    -lssl
 }
