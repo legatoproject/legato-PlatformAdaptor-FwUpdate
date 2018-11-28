@@ -271,19 +271,29 @@ le_result_t imgpatch_ApplyImgPatch
     {
         size_t srcStart = imgpatchMeta.cpMeta.src_start;
         size_t srcLen = imgpatchMeta.cpMeta.src_len;
-        LE_DEBUG("Copy chunk.src_start: %zu len: %zu", srcStart, srcLen);
-        memset(ChunkBuffer, 0, sizeof(ChunkBuffer));
-        if ( LE_OK != ReadChunk(srcDesc, srcStart, srcLen, ChunkBuffer))
-        {
-            LE_ERROR("Failed to read source chunk");
-            return LE_FAULT;
-        }
+        size_t offset = 0;
 
-        if (LE_OK != WriteChunk(ChunkBuffer, 0, srcLen, partCtxPtr))
+        LE_INFO("Copy chunk.src_start: %zu len: %zu", srcStart, srcLen);
+
+        do
         {
-           LE_ERROR("Failed to write chunk on target partition");
-           return LE_FAULT;
+            size_t dataToWrite = srcLen - offset;
+            size_t lenToFlush = MAX_CHUNK_LEN <= dataToWrite ? MAX_CHUNK_LEN : dataToWrite;
+            memset(ChunkBuffer, 0, sizeof(ChunkBuffer));
+            if ( LE_OK != ReadChunk(srcDesc, srcStart+offset, lenToFlush, ChunkBuffer))
+            {
+                LE_ERROR("Failed to read source chunk");
+                return LE_FAULT;
+            }
+
+            if (LE_OK != WriteChunk(ChunkBuffer, 0, lenToFlush, partCtxPtr))
+            {
+               LE_ERROR("Failed to write chunk on target partition");
+               return LE_FAULT;
+            }
+            offset += lenToFlush;
         }
+        while (offset < srcLen);
 
         if (wrLenToFlash)
         {
