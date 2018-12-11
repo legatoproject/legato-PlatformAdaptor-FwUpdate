@@ -12,6 +12,7 @@
 #include "partition_local.h"
 #include "pa_flash.h"
 #include "log.h"
+#include "sys_flash.h"
 
 //==================================================================================================
 //                                       Static variables
@@ -85,7 +86,7 @@ static void Test_pa_flash_WriteCwe
     cweFullHdrPtr->imageSize = 8 * CHUNK_SIZE + sizeof(cwe_Header_t);
     cweFullHdrPtr->crc32 = crc;
 
-    LE_INFO ("======== Test: pa_flash_WriteCwe ========");
+    LE_TEST_INFO ("======== Test: pa_flash_WriteCwe ========");
     ctx.fullImageSize = sizeof(body);
     ctx.fullImageCrc = crc;
     ctx.flashPoolPtr = &FlashImgPool;
@@ -205,7 +206,7 @@ static void Test_pa_flash_WriteDeltaCwe
     cweFullHdrPtr->imageSize = 17 * CHUNK_SIZE + 3*sizeof(cwe_Header_t);
     cweFullHdrPtr->crc32 = crc;
 
-    LE_INFO ("======== Test: pa_flash_WriteDeltaCwe ========");
+    LE_TEST_INFO ("======== Test: pa_flash_WriteDeltaCwe ========");
     ctx.fullImageSize = sizeof(body);
     ctx.fullImageCrc = crc;
     ctx.flashPoolPtr = &FlashImgPool;
@@ -219,7 +220,7 @@ static void Test_pa_flash_WriteDeltaCwe
     wrOff += sz;
     res = partition_GetSwifotaOffsetPartition(&start);
     LE_TEST(LE_OK == res);
-    LE_INFO("Swifota start %lx", (unsigned long)start);
+    LE_TEST_INFO("Swifota start %lx", (unsigned long)start);
 
     ctx.cweHdrPtr = cweHdrAPtr;
     sz = sizeof(cwe_Header_t);
@@ -263,11 +264,11 @@ static void Test_pa_flash_WriteDeltaCwe
     LE_TEST(LE_OK == res);
     res = partition_ComputeUbiVolumeCrc32SwifotaPartition(&ctx, 0, &sz, &crc, &fullSz, &fullCrc);
     LE_TEST(LE_OK == res);
-    LE_INFO("SZ %u CSZ %zu CFSZ %zu CRC %08x CCRC %08x CFCRC %08x",
+    LE_TEST_INFO("SZ %u CSZ %zu CFSZ %zu CRC %08x CCRC %08x CFCRC %08x",
             cweHdrBPtr->imageSize, sz, fullSz, cweHdrBPtr->crc32, crc, fullCrc);
     res = partition_ComputeUbiCrc32SwifotaPartition(&ctx, (uint32_t*)&sz, &crc);
     LE_TEST(LE_OK == res);
-    LE_INFO("SZ %zu CRC %08x", sz, crc);
+    LE_TEST_INFO("SZ %zu CRC %08x", sz, crc);
     res = partition_CloseUbiSwifotaPartition(&ctx, false, &iswr);
     LE_TEST(LE_OK == res);
 
@@ -298,17 +299,17 @@ static void Test_pa_flash_WriteDeltaCwe
     LE_TEST(LE_OK == res);
     res = partition_ComputeUbiVolumeCrc32SwifotaPartition(&ctx, 1, &sz, &crc, &fullSz, &fullCrc);
     LE_TEST(LE_OK == res);
-    LE_INFO("SZ %u CSZ %zu CFSZ %zu CRC %08x CCRC %08x CFCRC %08x",
+    LE_TEST_INFO("SZ %u CSZ %zu CFSZ %zu CRC %08x CCRC %08x CFCRC %08x",
             cweHdrBPtr->imageSize, sz, fullSz, cweHdrBPtr->crc32, crc, fullCrc);
     res = partition_ComputeUbiCrc32SwifotaPartition(&ctx, (uint32_t*)&sz, &crc);
     LE_TEST(LE_OK == res);
-    LE_INFO("SZ %zu CRC %08x", sz, crc);
+    LE_TEST_INFO("SZ %zu CRC %08x", sz, crc);
     res = partition_CloseUbiSwifotaPartition(&ctx, false, &iswr);
     LE_TEST(LE_OK == res);
     sz = 0;
     res = partition_GetSwifotaOffsetPartition(&end);
     LE_TEST(LE_OK == res);
-    LE_INFO("Swifota end %lx: length %lx", (unsigned long)end, (unsigned long)(end - start));
+    LE_TEST_INFO("Swifota end %lx: length %lx", (unsigned long)end, (unsigned long)(end - start));
 
     res = partition_ComputeDataCrc32SwifotaPartition(&ctx, sizeof(cwe_Header_t),
                                                      (end - start), &crc);
@@ -318,11 +319,11 @@ static void Test_pa_flash_WriteDeltaCwe
     LE_TEST(LE_OK == res);
     ctx.fullImageCrc = crc;
     res = partition_WriteSwifotaPartition(&ctx, &sz, body, false, &iswr);
-    LE_INFO("RES = %d", res);
+    LE_TEST_INFO("RES = %d", res);
     res = partition_ComputeDataCrc32SwifotaPartition(&ctx, sizeof(cwe_Header_t),
                                                      (end - start), &crc);
     LE_TEST(LE_OK == res);
-    LE_INFO("FCRC %08x CRC %08x", ctx.fullImageCrc, crc);
+    LE_TEST_INFO("FCRC %08x CRC %08x", ctx.fullImageCrc, crc);
     DeltaCweCrc = crc;
     res = partition_ComputeDataCrc32SwifotaPartition(&ctx, 0,
                                                      (end - start) + sizeof(cwe_Header_t), &crc);
@@ -379,7 +380,7 @@ static void Test_pa_flash_ResumeWriteCwe
     cweFullHdrPtr->imageSize = 8 * CHUNK_SIZE + sizeof(cwe_Header_t);
     cweFullHdrPtr->crc32 = crc;
 
-    LE_INFO ("======== Test: pa_flash_ResumeWriteCwe ========");
+    LE_TEST_INFO ("======== Test: pa_flash_ResumeWriteCwe ========");
     ctx.fullImageSize = sizeof(body);
     ctx.fullImageCrc = crc;
     ctx.flashPoolPtr = &FlashImgPool;
@@ -417,10 +418,10 @@ static void Test_pa_flash_ResumeWriteCwe
 
     res = partition_OpenSwifotaPartition(&ctx, wrOff);
     LE_TEST(LE_OK == res);
-    LE_ASSERT(LE_OK == res);
+    LE_TEST_ASSERT(LE_OK == res, "");
     res = partition_SetPartitionInternals((void*)part);
     LE_TEST(LE_OK == res);
-    LE_ASSERT(LE_OK == res);
+    LE_TEST_ASSERT(LE_OK == res, "");
 
     for( ; nb < 8 * CHUNK_SIZE; nb += sz)
     {
@@ -449,9 +450,9 @@ static void Test_pa_flash_ResumeWriteCwe
                                                      &fullCrc);
     LE_TEST(LE_OK == res);
 
-    LE_INFO("Expected CRC %08x %08x = Computed CRC %08x %08x", CweCrc, CweFullCrc, crc, fullCrc);
-    LE_ASSERT(CweCrc == crc);
-    LE_ASSERT(CweFullCrc == fullCrc);
+    LE_TEST_INFO("Expected CRC %08x %08x = Computed CRC %08x %08x", CweCrc, CweFullCrc, crc, fullCrc);
+    LE_TEST_ASSERT(CweCrc == crc, "");
+    LE_TEST_ASSERT(CweFullCrc == fullCrc, "");
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -528,7 +529,7 @@ static void Test_pa_flash_ResumeWriteDeltaCwe
     cweFullHdrPtr->imageSize = 17 * CHUNK_SIZE + 3*sizeof(cwe_Header_t);
     cweFullHdrPtr->crc32 = crc;
 
-    LE_INFO ("======== Test: pa_flash_ResumeWriteDeltaCwe ========");
+    LE_TEST_INFO ("======== Test: pa_flash_ResumeWriteDeltaCwe ========");
     ctx.fullImageSize = sizeof(body);
     ctx.fullImageCrc = crc;
     ctx.flashPoolPtr = &FlashImgPool;
@@ -542,7 +543,7 @@ static void Test_pa_flash_ResumeWriteDeltaCwe
     wrOff += sz;
     res = partition_GetSwifotaOffsetPartition(&start);
     LE_TEST(LE_OK == res);
-    LE_INFO("Swifota start %lx", (unsigned long)start);
+    LE_TEST_INFO("Swifota start %lx", (unsigned long)start);
 
     res = partition_GetPartitionInternals(&partPtr, &partSize);
     LE_TEST(LE_OK == res);
@@ -570,10 +571,10 @@ static void Test_pa_flash_ResumeWriteDeltaCwe
 
     res = partition_OpenSwifotaPartition(&ctx, wrOff);
     LE_TEST(LE_OK == res);
-    LE_ASSERT(LE_OK == res);
+    LE_TEST_ASSERT(LE_OK == res, "");
     res = partition_SetPartitionInternals((void*)part);
     LE_TEST(LE_OK == res);
-    LE_ASSERT(LE_OK == res);
+    LE_TEST_ASSERT(LE_OK == res, "");
 
     for( ; nb < 8 * CHUNK_SIZE; nb += sz)
     {
@@ -614,11 +615,11 @@ static void Test_pa_flash_ResumeWriteDeltaCwe
     memcpy(part, partPtr, partSize);
     res = partition_ComputeUbiVolumeCrc32SwifotaPartition(&ctx, 0, &sz, &crc, &fullSz, &fullCrc);
     LE_TEST(LE_OK == res);
-    LE_INFO("SZ %u CSZ %zu CFSZ %zu CRC %08x CCRC %08x CFCRC %08x",
+    LE_TEST_INFO("SZ %u CSZ %zu CFSZ %zu CRC %08x CCRC %08x CFCRC %08x",
             cweHdrBPtr->imageSize, sz, fullSz, cweHdrBPtr->crc32, crc, fullCrc);
     res = partition_ComputeUbiCrc32SwifotaPartition(&ctx, (uint32_t*)&sz, &crc);
     LE_TEST(LE_OK == res);
-    LE_INFO("SZ %zu CRC %08x", sz, crc);
+    LE_TEST_INFO("SZ %zu CRC %08x", sz, crc);
     res = partition_CloseUbiSwifotaPartition(&ctx, false, &iswr);
     LE_TEST(LE_OK == res);
 
@@ -651,17 +652,17 @@ static void Test_pa_flash_ResumeWriteDeltaCwe
 
     res = partition_OpenSwifotaPartition(&ctx, swiOff);
     LE_TEST(LE_OK == res);
-    LE_ASSERT(LE_OK == res);
+    LE_TEST_ASSERT(LE_OK == res, "");
     res = partition_SetPartitionInternals((void*)part);
     LE_TEST(LE_OK == res);
-    LE_ASSERT(LE_OK == res);
+    LE_TEST_ASSERT(LE_OK == res, "");
     res = partition_OpenUbiSwifotaPartition(&ctx, 0, false, false, &iswr);
     LE_TEST(LE_OK == res);
-    LE_ASSERT(LE_OK == res);
+    LE_TEST_ASSERT(LE_OK == res, "");
     res = partition_OpenUbiVolumeSwifotaPartition(&ctx, 1, PA_FLASH_VOLUME_DYNAMIC,
                                                   -1, 1, "volume1", false);
     LE_TEST(LE_OK == res);
-    LE_ASSERT(LE_OK == res);
+    LE_TEST_ASSERT(LE_OK == res, "");
 
     for( ; nb < 5 * CHUNK_SIZE; nb += sz)
     {
@@ -677,17 +678,17 @@ static void Test_pa_flash_ResumeWriteDeltaCwe
     LE_TEST(LE_OK == res);
     res = partition_ComputeUbiVolumeCrc32SwifotaPartition(&ctx, 1, &sz, &crc, &fullSz, &fullCrc);
     LE_TEST(LE_OK == res);
-    LE_INFO("SZ %u CSZ %zu CFSZ %zu CRC %08x CCRC %08x CFCRC %08x",
+    LE_TEST_INFO("SZ %u CSZ %zu CFSZ %zu CRC %08x CCRC %08x CFCRC %08x",
             cweHdrBPtr->imageSize, sz, fullSz, cweHdrBPtr->crc32, crc, fullCrc);
     res = partition_ComputeUbiCrc32SwifotaPartition(&ctx, (uint32_t*)&sz, &crc);
     LE_TEST(LE_OK == res);
-    LE_INFO("SZ %zu CRC %08x", sz, crc);
+    LE_TEST_INFO("SZ %zu CRC %08x", sz, crc);
     res = partition_CloseUbiSwifotaPartition(&ctx, false, &iswr);
     LE_TEST(LE_OK == res);
     sz = 0;
     res = partition_GetSwifotaOffsetPartition(&end);
     LE_TEST(LE_OK == res);
-    LE_INFO("Swifota end %lx: length %lx", (unsigned long)end, (unsigned long)(end - start));
+    LE_TEST_INFO("Swifota end %lx: length %lx", (unsigned long)end, (unsigned long)(end - start));
 
     res = partition_ComputeDataCrc32SwifotaPartition(&ctx, sizeof(cwe_Header_t),
                                                      (end - start), &crc);
@@ -697,11 +698,11 @@ static void Test_pa_flash_ResumeWriteDeltaCwe
     LE_TEST(LE_OK == res);
     ctx.fullImageCrc = crc;
     res = partition_WriteSwifotaPartition(&ctx, &sz, body, false, &iswr);
-    LE_INFO("RES = %d", res);
+    LE_TEST_INFO("RES = %d", res);
     res = partition_ComputeDataCrc32SwifotaPartition(&ctx, sizeof(cwe_Header_t),
                                                      (end - start), &crc);
     LE_TEST(LE_OK == res);
-    LE_INFO("FCRC %08x CRC %08x", ctx.fullImageCrc, crc);
+    LE_TEST_INFO("FCRC %08x CRC %08x", ctx.fullImageCrc, crc);
 
     res = partition_ComputeDataCrc32SwifotaPartition(&ctx, 0,
                                                      (end - start) + sizeof(cwe_Header_t),
@@ -710,10 +711,10 @@ static void Test_pa_flash_ResumeWriteDeltaCwe
     res = partition_CloseSwifotaPartition(&ctx, wrOff, false, NULL);
     LE_TEST(LE_OK == res);
 
-    LE_INFO("Expected CRC %08x %08x = Computed CRC %08x %08x",
+    LE_TEST_INFO("Expected CRC %08x %08x = Computed CRC %08x %08x",
             DeltaCweCrc, DeltaCweFullCrc, crc, fullCrc);
-    LE_ASSERT(DeltaCweCrc == crc);
-    LE_ASSERT(DeltaCweFullCrc == fullCrc);
+    LE_TEST_ASSERT(DeltaCweCrc == crc, "");
+    LE_TEST_ASSERT(DeltaCweFullCrc == fullCrc, "");
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -726,7 +727,8 @@ COMPONENT_INIT
     int mtdNum;
     pa_flash_Info_t flashInfo;
 
-    LE_TEST_INIT;
+    LE_TEST_PLAN(LE_TEST_NO_PLAN);
+
     // Get MTD information from SWIFOTA partition. This is will be used to set the
     // pool object size and compute the max object size
     mtdNum = partition_GetMtdFromImageTypeOrName( 0, "swifota", NULL );
@@ -745,16 +747,47 @@ COMPONENT_INIT
     // Request 3 blocks: 1 for flash, 1 spare, 1 for check
     le_mem_ExpandPool(FlashImgPool, 3);
 
+    int bbMaskIdx = 0;
+    unsigned long long bbMask = 0;
+    unsigned long long bbMaskTab[] =
+    {
+        // This is the bad blocks mask:
+        //     if bit 1<<n is set to 1, the block "n" will be seen as "bad"
+        // Bad blocks will be "raised" while erasing flash,
+        0ULL,
+        0x11182ULL | (1ULL << 59),
+        0xFF0ULL,
+        -1ULL,
+    };
+
     partition_Initialize();
 
-    Test_pa_flash_WriteCwe();
+    char *bbPtr = getenv("BAD_BLOCK_SWIFOTA");
+    if( bbPtr && *bbPtr )
+    {
+        sscanf( bbPtr, "%llx", &bbMask );
+        LE_TEST_INFO("Bad block string \"%s\", mask %llx", bbPtr, bbMask);
+        sys_flash_SetBadBlockErase( "swifota", bbMask );
+    }
 
-    Test_pa_flash_WriteDeltaCwe();
+    do
+    {
+        LE_TEST_INFO("======== Start UnitTest of FW PA FLASH [Bad block mask 0x%llx] ========",
+                bbMask);
 
-    Test_pa_flash_ResumeWriteCwe();
+        sys_flash_ResetBadBlock( "swifota" );
+        sys_flash_SetBadBlockErase( "swifota", bbMask );
 
-    Test_pa_flash_ResumeWriteDeltaCwe();
+        Test_pa_flash_WriteCwe();
+        Test_pa_flash_WriteDeltaCwe();
+        Test_pa_flash_ResumeWriteCwe();
+        Test_pa_flash_ResumeWriteDeltaCwe();
 
-    LE_INFO ("======== FW PA FLASH SUCCESS ========");
+        bbMask = bbMaskTab[bbMaskIdx];
+        bbMaskIdx++;
+    }
+    while( bbMask != (-1ULL) );
+
+    LE_TEST_INFO ("======== FW PA FLASH end ========");
     LE_TEST_EXIT;
 }

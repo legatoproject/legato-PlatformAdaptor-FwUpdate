@@ -23,7 +23,7 @@ cflags:
     -I${LEGATO_ROOT}/platformAdaptor/fwupdate/pa_flash/inc
     -I${LEGATO_ROOT}/platformAdaptor/fwupdate/pa_patch/inc
     -I${LEGATO_ROOT}/platformAdaptor/fwupdate/common
-    -DPA_FWUPDATE_PRODUCT_ID=0x39583430
+    -DPA_FWUPDATE_PRODUCT_ID=0x39583238
     -DSIERRA_BSPATCH
     -Dfopen=sys_flashFOpen
     -Dopen=sys_flashOpen

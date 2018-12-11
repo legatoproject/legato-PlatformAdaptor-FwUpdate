@@ -48,65 +48,65 @@ static void ApplySwap
     char line2[256];
 
     fdPtr = fopen("/sys/class/mtd/mtd0/erasesize", "r");
-    LE_ASSERT(fdPtr);
+    LE_TEST_ASSERT(fdPtr, "");
     rc = fscanf(fdPtr, "%u", &eraseSize);
-    LE_ASSERT(rc == 1);
+    LE_TEST_ASSERT(rc == 1, "");
     fclose(fdPtr);
 
     fdPtr = fopen("/proc/mtd", "r");
-    LE_ASSERT(fdPtr);
+    LE_TEST_ASSERT(fdPtr, "");
     while( fgets(line, sizeof(line)-1, fdPtr) )
     {
         line[sizeof(line)-1] = '\0';
         if( strstr( line, "\"aboot\"" ))
         {
             rc = sscanf( line, "mtd%d", &mtdAboot[0] );
-            LE_ASSERT(rc == 1);
+            LE_TEST_ASSERT(rc == 1, "");
         }
         else if( strstr( line, "\"aboot2\"" ))
         {
             rc = sscanf( line, "mtd%d", &mtdAboot[1] );
-            LE_ASSERT(rc == 1);
+            LE_TEST_ASSERT(rc == 1, "");
         }
         else if( strstr( line, "\"boot\"" ))
         {
             rc = sscanf( line, "mtd%d", &mtdBoot[0] );
-            LE_ASSERT(rc == 1);
+            LE_TEST_ASSERT(rc == 1, "");
         }
         else if( strstr( line, "\"boot2\"" ))
         {
             rc = sscanf( line, "mtd%d", &mtdBoot[1] );
-            LE_ASSERT(rc == 1);
+            LE_TEST_ASSERT(rc == 1, "");
         }
         else if( strstr( line, "\"system\"" ))
         {
             rc = sscanf( line, "mtd%d", &mtdSystem[0] );
-            LE_ASSERT(rc == 1);
+            LE_TEST_ASSERT(rc == 1, "");
         }
         else if( strstr( line, "\"system2\"" ))
         {
             rc = sscanf( line, "mtd%d", &mtdSystem[1] );
-            LE_ASSERT(rc == 1);
+            LE_TEST_ASSERT(rc == 1, "");
         }
         else if( strstr( line, "\"lefwkro\"" ))
         {
             rc = sscanf( line, "mtd%d", &mtdLefwkro[0] );
-            LE_ASSERT(rc == 1);
+            LE_TEST_ASSERT(rc == 1, "");
         }
         else if( strstr( line, "\"lefwkro2\"" ))
         {
             rc = sscanf( line, "mtd%d", &mtdLefwkro[1] );
-            LE_ASSERT(rc == 1);
+            LE_TEST_ASSERT(rc == 1, "");
         }
         else if( strstr( line, "\"modem\"" ))
         {
             rc = sscanf( line, "mtd%d", &mtdModem[0] );
-            LE_ASSERT(rc == 1);
+            LE_TEST_ASSERT(rc == 1, "");
         }
         else if( strstr( line, "\"modem2\"" ))
         {
             rc = sscanf( line, "mtd%d", &mtdModem[1] );
-            LE_ASSERT(rc == 1);
+            LE_TEST_ASSERT(rc == 1, "");
         }
         else
         {
@@ -123,7 +123,7 @@ static void ApplySwap
     snprintf(line, sizeof(line), "/dev/mtd%d", mtdAboot[1]);
     snprintf(line2, sizeof(line), "/dev/mtd%d_tmp", mtdAboot[0]);
     rc = rename(line2, line);
-    LE_ASSERT(rc != -1);
+    LE_TEST_ASSERT(rc != -1, "");
 
     snprintf(line, sizeof(line), "/dev/mtd%d_tmp", mtdBoot[0]);
     snprintf(line2, sizeof(line), "/dev/mtd%d", mtdBoot[0]);
@@ -134,7 +134,7 @@ static void ApplySwap
     snprintf(line, sizeof(line), "/dev/mtd%d", mtdBoot[1]);
     snprintf(line2, sizeof(line), "/dev/mtd%d_tmp", mtdBoot[0]);
     rc = rename(line2, line);
-    LE_ASSERT(rc != -1);
+    LE_TEST_ASSERT(rc != -1, "");
 
     snprintf(line, sizeof(line), "/dev/mtd%d_tmp", mtdSystem[0]);
     snprintf(line2, sizeof(line), "/dev/mtd%d", mtdSystem[0]);
@@ -145,7 +145,7 @@ static void ApplySwap
     snprintf(line, sizeof(line), "/dev/mtd%d", mtdSystem[1]);
     snprintf(line2, sizeof(line), "/dev/mtd%d_tmp", mtdSystem[0]);
     rc = rename(line2, line);
-    LE_ASSERT(rc != -1);
+    LE_TEST_ASSERT(rc != -1, "");
 
     snprintf(line, sizeof(line), "/dev/mtd%d_tmp", mtdLefwkro[0]);
     snprintf(line2, sizeof(line), "/dev/mtd%d", mtdLefwkro[0]);
@@ -156,29 +156,29 @@ static void ApplySwap
     snprintf(line, sizeof(line), "/dev/mtd%d", mtdLefwkro[1]);
     snprintf(line2, sizeof(line), "/dev/mtd%d_tmp", mtdLefwkro[0]);
     rc = rename(line2, line);
-    LE_ASSERT(rc != -1);
+    LE_TEST_ASSERT(rc != -1, "");
 
     snprintf(line, sizeof(line), "/dev/mtd%d_tmp", mtdModem[0]);
     snprintf(line2, sizeof(line), "/dev/mtd%d", mtdModem[0]);
     rc = rename(line2, line);
-    LE_ASSERT(rc != -1);
+    LE_TEST_ASSERT(rc != -1, "");
     snprintf(line, sizeof(line), "/dev/mtd%d", mtdModem[0]);
     snprintf(line2, sizeof(line), "/dev/mtd%d", mtdModem[1]);
     rc = rename(line2, line);
-    LE_ASSERT(rc != -1);
+    LE_TEST_ASSERT(rc != -1, "");
     snprintf(line, sizeof(line), "/dev/mtd%d", mtdModem[1]);
     snprintf(line2, sizeof(line), "/dev/mtd%d_tmp", mtdModem[0]);
     rc = rename(line2, line);
-    LE_ASSERT(rc != -1);
-    LE_INFO("SWAP complete");
+    LE_TEST_ASSERT(rc != -1, "");
+    LE_TEST_INFO("SWAP complete");
 
     // Erase all remaining blocks in destination partition
     snprintf(line, sizeof(line), "/sys/class/mtd/mtd%d/size", mtdLefwkro[0]);
     fdPtr = fopen(line, "r");
-    LE_ASSERT(fdPtr);
+    LE_TEST_ASSERT(fdPtr, "");
     rc = fscanf(fdPtr, "%u", &nbBlk);
     nbBlk /= eraseSize;
-    LE_ASSERT(rc == 1);
+    LE_TEST_ASSERT(rc == 1, "");
     fclose(fdPtr);
 
     uint8_t ubiEc[64] =
@@ -193,10 +193,12 @@ static void ApplySwap
 
     snprintf(line, sizeof(line), "/dev/mtd%d", mtdLefwkro[0]);
     fdDest = open(line, O_RDWR);
-    LE_ASSERT(-1 != fdDest);
+    LE_TEST_ASSERT(-1 != fdDest, "");
     lseek( fdDest, 0, SEEK_SET);
     memset(buffer, 0xFF, sizeof(buffer));
     memcpy(buffer, ubiEc, sizeof(ubiEc));
+
+    sys_flash_SwapBadBlock( "lefwkro2", "lefwkro" );
 
     int nb;
     for( nb = 0; nb < nbBlk; nb++ )
@@ -210,7 +212,7 @@ static void ApplySwap
         }
     }
     close(fdDest);
-    LE_INFO("SWIFOTA applied");
+    LE_TEST_INFO("SWAP applied");
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -236,18 +238,18 @@ static void Testpa_fwupdate_Download
     le_result_t result;
 
     // Initialize download
-    LE_INFO ("Test: Download %s", imagePtr);
+    LE_TEST_INFO ("Test: Download %s", imagePtr);
     LE_TEST(LE_OK == pa_fwupdate_InitDownload());
 
     // Check if the suspend offset is within the image
     struct stat st;
-    LE_ASSERT(0 == stat(imagePtr, &st));
-    LE_ASSERT(st.st_size > suspendAtOffset)
+    LE_TEST_ASSERT(0 == stat(imagePtr, &st), "");
+    LE_TEST_ASSERT(st.st_size > suspendAtOffset, "");
 
     // Fork the program and send the image content using a pipe
-    LE_ASSERT(-1 != pipe(pip));
+    LE_TEST_ASSERT(-1 != pipe(pip), "");
     pid = fork();
-    LE_ASSERT(-1 != pid);
+    LE_TEST_ASSERT(-1 != pid, "");
     if( 0 == pid )
     {
         int fd;
@@ -257,7 +259,7 @@ static void Testpa_fwupdate_Download
 
         close(pip[0]);
         fd = open(imagePtr, O_RDONLY);
-        LE_ASSERT(fd >= 0);
+        LE_TEST_ASSERT(fd >= 0, "");
         for( ; ; )
         {
             rcr = read(fd, buff, sizeof(buff));
@@ -273,7 +275,7 @@ static void Testpa_fwupdate_Download
             }
             if( suspendAtOffset && (rdLen >= suspendAtOffset) )
             {
-                LE_INFO("Max size for read reached (%d %u)", rdLen, suspendAtOffset);
+                LE_TEST_INFO("Max size for read reached (%d %u)", rdLen, suspendAtOffset);
                 break;
             }
         }
@@ -285,11 +287,11 @@ static void Testpa_fwupdate_Download
 
     if (suspendAtOffset == 0)
     {
-        LE_ASSERT_OK(pa_fwupdate_Download(pip[0]));
+        LE_TEST_ASSERT(LE_OK == pa_fwupdate_Download(pip[0]), "");
     }
     else
     {
-        LE_ASSERT(LE_OK != pa_fwupdate_Download(pip[0]));
+        LE_TEST_ASSERT(LE_OK != pa_fwupdate_Download(pip[0]), "");
     }
 
     close(pip[0]);
@@ -308,18 +310,18 @@ static void Testpa_fwupdate_Download
         result = pa_fwupdate_GetResumePosition(&position);
         if ((result == LE_OK) && (position != 0))
         {
-            LE_INFO("resume download at position %zd", position);
+            LE_TEST_INFO("resume download at position %zd", position);
         }
         else
         {
             LE_ERROR("Can't resume");
-            LE_ASSERT(0);
+            LE_TEST_ASSERT(0, "");
         }
 
         // Fork the program and send the remaining image content using a pipe
-        LE_ASSERT(-1 != pipe(pip));
+        LE_TEST_ASSERT(-1 != pipe(pip), "");
         pid = fork();
-        LE_ASSERT(-1 != pid);
+        LE_TEST_ASSERT(-1 != pid, "");
         if( 0 == pid )
         {
             int fd;
@@ -328,7 +330,7 @@ static void Testpa_fwupdate_Download
 
             close(pip[0]);
             fd = open(imagePtr, O_RDONLY);
-            LE_ASSERT(fd >= 0);
+            LE_TEST_ASSERT(fd >= 0, "");
             if (lseek(fd,position,SEEK_SET) < 0)
             {
                 LE_ERROR("Unable to seek to the correct position");
@@ -353,7 +355,7 @@ static void Testpa_fwupdate_Download
         }
 
         close(pip[1]);
-        LE_ASSERT(LE_OK == pa_fwupdate_Download(pip[0]));
+        LE_TEST_ASSERT(LE_OK == pa_fwupdate_Download(pip[0]), "");
         close(pip[0]);
         waitpid(pid, &status, 0);
     }
@@ -375,6 +377,8 @@ COMPONENT_INIT
     const char* imagePtr;
     uint32_t suspendAtOffset;
 
+    LE_TEST_PLAN(LE_TEST_NO_PLAN);
+
     // Get command line arguments
     snprintf(thisPath, sizeof(thisPath), "/proc/%d/cmdline", getpid());
     FILE* fdPtr = fopen( thisPath, "r" );
@@ -388,6 +392,75 @@ COMPONENT_INIT
     }
     chdir(thisPath);
 
+    int bbMaskIdx = 0;
+    unsigned long long bbMask = 0;
+    unsigned long long bbMaskTab[][3] =
+    {
+        // These are the bad blocks masks:
+        //     if bit 1<<n is set to 1, the block "n" will be seen as "bad"
+        // 3 values for the 3 kinds of bad blocks simulated by sys_flash:
+        //     [0] = bad blocks while erasing flash,
+        //     [1] = bad blocks while writing,
+        //     [2] = bad blocks already marked [Not used]
+        { 0ULL, 0ULL, 0ULL },
+        { 0x11182ULL | (1ULL << 59), 0x24228ULL, 0ULL, },
+        { 0xFF0ULL, 0x000333ULL, 0ULL, },
+        { -1ULL, },
+    };
+
+    char *bbPtr = getenv("BAD_BLOCK_LEFWKRO2");
+    if( bbPtr && *bbPtr )
+    {
+        sscanf( bbPtr, "%llx", &bbMask );
+        LE_TEST_INFO("Bad block string \"%s\", mask %llx", bbPtr, bbMask);
+        sys_flash_SetBadBlockErase( "lefwkro2", bbMask );
+    }
+
+    do
+    {
+        // Create file to store the download last status
+        if ((-1 == unlink(FILE_PATH)) && (ENOENT != errno))
+        {
+            LE_TEST_FATAL("unlink failed: %m");
+        }
+        LE_TEST(LE_OK == le_fs_Open(FILE_PATH, LE_FS_CREAT | LE_FS_RDWR, &fileRef));
+
+        LE_TEST_INFO("======== Start UnitTest of FW Update Dualsys"
+                     " [Bad block mask 0x%llx] ========", bbMask);
+
+        sys_flash_SetBadBlockErase( "lefwkro2", bbMask );
+        sys_flash_SetBadBlockWrite( "lefwkro2", bbMaskTab[bbMaskIdx][1] );
+
+        if (le_arg_NumArgs() >= 2)
+        {
+            LE_TEST_INFO ("=========== Download the initial package ==========");
+            imagePtr = le_arg_GetArg( 0 );
+            if (strcmp(imagePtr, "-"))
+            {
+                sscanf(le_arg_GetArg( 1 ), "%u", &suspendAtOffset);
+                Testpa_fwupdate_Download(imagePtr, suspendAtOffset);
+            }
+        }
+
+        if (le_arg_NumArgs() >= 4)
+        {
+            LE_TEST_INFO ("=========== Download the delta package ==========");
+            imagePtr = le_arg_GetArg( 2 );
+            if (strcmp(imagePtr, "-"))
+            {
+                sscanf(le_arg_GetArg( 3 ), "%u", &suspendAtOffset);
+                Testpa_fwupdate_Download(imagePtr, suspendAtOffset);
+            }
+        }
+
+        bbMask = bbMaskTab[bbMaskIdx][0];
+        bbMaskIdx++;
+    }
+    while( bbMask != (-1ULL) );
+
+    sys_flash_ResetBadBlock( "lefwkro" );
+    sys_flash_ResetBadBlock( "lefwkro2" );
+
     // Create file to store the download last status
     if ((-1 == unlink(FILE_PATH)) && (ENOENT != errno))
     {
@@ -395,24 +468,53 @@ COMPONENT_INIT
     }
     LE_TEST(LE_OK == le_fs_Open(FILE_PATH, LE_FS_CREAT | LE_FS_RDWR, &fileRef));
 
-    LE_INFO("======== Start UnitTest of FW Update Singlesys ========");
+    LE_TEST_INFO("======== Start UnitTest of FW Update Dualsys"
+                 " [Bad block mask 0x%llx] ========", bbMask);
 
     if (le_arg_NumArgs() >= 2)
     {
-        LE_INFO ("=========== Download the initial package ==========");
+        struct stat st;
+
+        LE_TEST_INFO ("=========== Download the initial package ==========");
         imagePtr = le_arg_GetArg( 0 );
-        sscanf(le_arg_GetArg( 1 ), "%u", &suspendAtOffset);
-        Testpa_fwupdate_Download(imagePtr, suspendAtOffset);
+        if (strcmp(imagePtr, "-"))
+        {
+            LE_TEST_ASSERT(0 == stat(imagePtr, &st), "");
+            sscanf(le_arg_GetArg( 1 ), "%u", &suspendAtOffset);
+            sys_flash_SetSizeInByte( "lefwkro", st.st_size, 2 );
+            sys_flash_SetSizeInByte( "lefwkro2", st.st_size, 2 );
+            Testpa_fwupdate_Download(imagePtr, suspendAtOffset);
+        }
     }
 
     if (le_arg_NumArgs() >= 4)
     {
-        LE_INFO ("=========== Download the delta package ==========");
-        imagePtr = le_arg_GetArg( 2 );
-        sscanf(le_arg_GetArg( 3 ), "%u", &suspendAtOffset);
+        sys_flash_SetBadBlockErase( "lefwkro2", 0ULL );
+        sys_flash_SetBadBlockWrite( "lefwkro2", 0x81ULL );
+
+        LE_TEST_INFO ("=========== Download the delta package ==========");
+        if (strcmp(imagePtr, "-"))
+        {
+            imagePtr = le_arg_GetArg( 2 );
+            sscanf(le_arg_GetArg( 3 ), "%u", &suspendAtOffset);
+            Testpa_fwupdate_Download(imagePtr, suspendAtOffset);
+        }
+    }
+
+    LE_TEST_INFO("======== Start UnitTest of FW Update Dualsys for SBL"
+                 " [Bad blocks 1,3] ========");
+    if (le_arg_NumArgs() >= 5)
+    {
+        sys_flash_SetBadBlockErase( "sbl", 0ULL );
+        sys_flash_SetBadBlockWrite( "sbl", 0ULL );
+        sys_flash_SetBadBlockMarked( "sbl", 0xAULL /* blocks 1 and 3 */ );
+
+        LE_TEST_INFO ("=========== Download the boot (SBL) package ==========");
+        imagePtr = le_arg_GetArg( 4 );
+        suspendAtOffset = 0;
         Testpa_fwupdate_Download(imagePtr, suspendAtOffset);
     }
 
-    LE_INFO("======== FW Update Singlesys tests SUCCESS ========");
+    LE_TEST_INFO("======== FW Update tests end ========");
     LE_TEST_EXIT;
 }
