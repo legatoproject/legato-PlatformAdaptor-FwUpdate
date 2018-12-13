@@ -241,8 +241,12 @@ static le_result_t FlashRead
         }
 
         // Get the current physical offset
-        offset = lseek(descPtr->fd, 0, SEEK_CUR);
-        peb = offset / descPtr->mtdInfo.eraseSize;
+        res = pa_flash_Tell(desc, &peb, &offset);
+        LE_DEBUG2("Tell %x, offset %lx", peb, offset);
+        if (LE_OK != res)
+        {
+            goto error;
+        }
         offInPeb = offset & (descPtr->mtdInfo.eraseSize - 1);
 
         // The data to read may overlaps on two PEB. So compute the size for the lower PEB
@@ -330,8 +334,12 @@ static le_result_t FlashWrite
         }
 
         // Get the current physical offset
-        offset = lseek(descPtr->fd, 0, SEEK_CUR);
-        peb = offset / descPtr->mtdInfo.eraseSize;
+        res = pa_flash_Tell(desc, &peb, &offset);
+        LE_DEBUG2("Tell %x, offset %lx", peb, offset);
+        if (LE_OK != res)
+        {
+            goto error;
+        }
         offInPeb = offset & (descPtr->mtdInfo.eraseSize - 1);
 
         // The data to write may overlaps on two PEB. So compute the size for the lower PEB
@@ -3342,8 +3350,7 @@ le_result_t pa_flash_Tell
 (
     pa_flash_Desc_t desc,     ///< [IN] Private flash descriptor
     uint32_t* blockIndexPtr,  ///< [OUT] Current Physical or Logical block
-    off_t* offsetPtr,         ///< [OUT] Current Physical or Logical offset
-    off_t* absOffsetPtr       ///< [OUT] Current absolute offset
+    off_t* offsetPtr          ///< [OUT] Current Physical or Logical offset
 )
 {
     pa_flash_MtdDesc_t *descPtr = (pa_flash_MtdDesc_t *)desc;
@@ -3374,6 +3381,19 @@ le_result_t pa_flash_Tell
             {
                 break;
             }
+            else if( descPtr->lebToPeb[blockIndex] > peb )
+            {
+                LE_INFO("Realign peb %u to peb %u", peb, descPtr->lebToPeb[blockIndex]);
+                peb = descPtr->lebToPeb[blockIndex];
+                offset = lseek(descPtr->fd, peb * descPtr->mtdInfo.eraseSize, SEEK_SET);
+                if( -1 == offset )
+                {
+                    LE_ERROR("MTD %d: lseek fails to set at offset %lx, peb %u: %m",
+                             descPtr->mtdNum, offset, peb);
+                    return (EIO == errno) ? LE_IO_ERROR : LE_FAULT;
+                }
+                break;
+            }
         }
         // No LEB linked. Offset is invalid
         if( blockIndex == descPtr->mtdInfo.nbLeb )
@@ -3390,52 +3410,6 @@ le_result_t pa_flash_Tell
     if( blockIndexPtr )
     {
         *blockIndexPtr = blockIndex;
-    }
-    if( absOffsetPtr )
-    {
-        *absOffsetPtr = offset;
-    }
-    return LE_OK;
-}
-
-//--------------------------------------------------------------------------------------------------
-/**
- * Set the current pointer of the flash to the given offset
- *
- * @return
- *      - LE_OK            On success
- *      - LE_BAD_PARAMETER If desc is NULL
- *      - LE_FAULT         On failure
- *      - LE_OUT_OF_RANGE  If the block is outside the partition
- *      - LE_NOT_PERMITTED If the LEB is not linked to a PEB
- *      - LE_IO_ERROR      If a flash IO error occurs
- */
-//--------------------------------------------------------------------------------------------------
-le_result_t pa_flash_SeekAtAbsOffset
-(
-    pa_flash_Desc_t desc,
-    off_t offset
-)
-{
-    pa_flash_MtdDesc_t *descPtr = (pa_flash_MtdDesc_t *)desc;
-    int rc;
-
-    if( (!descPtr) || (descPtr->magic != desc) )
-    {
-        return LE_BAD_PARAMETER;
-    }
-
-    if( offset > descPtr->mtdInfo.size )
-    {
-        return LE_OUT_OF_RANGE;
-    }
-
-    rc = lseek(descPtr->fd, offset, SEEK_SET);
-    if( -1 == rc )
-    {
-        LE_ERROR("MTD %d: lseek fails at peb %lu offset %lx: %m",
-                 descPtr->mtdNum, offset / descPtr->mtdInfo.eraseSize, offset);
-        return (EIO == errno) ? LE_IO_ERROR : LE_FAULT;
     }
     return LE_OK;
 }
