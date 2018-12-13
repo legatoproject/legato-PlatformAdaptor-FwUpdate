@@ -57,27 +57,7 @@ LE_SHARED le_result_t pa_flash_Tell
 (
     pa_flash_Desc_t desc,     ///< [IN] Private flash descriptor
     uint32_t* blockIndexPtr,  ///< [OUT] Current Physical or Logical block
-    off_t* offsetPtr,         ///< [OUT] Current Physical or Logical offset
-    off_t* absOffsetPtr       ///< [OUT] Current absolute offset
-);
-
-//--------------------------------------------------------------------------------------------------
-/**
- * Set the current pointer of the flash to the given offset
- *
- * @return
- *      - LE_OK            On success
- *      - LE_BAD_PARAMETER If desc is NULL
- *      - LE_FAULT         On failure
- *      - LE_OUT_OF_RANGE  If the block is outside the partition
- *      - LE_NOT_PERMITTED If the LEB is not linked to a PEB
- *      - LE_IO_ERROR      If a flash IO error occurs
- */
-//--------------------------------------------------------------------------------------------------
-LE_SHARED le_result_t pa_flash_SeekAtAbsOffset
-(
-    pa_flash_Desc_t desc,
-    off_t offset
+    off_t* offsetPtr          ///< [OUT] Current Physical or Logical offset
 );
 
 //--------------------------------------------------------------------------------------------------

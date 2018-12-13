@@ -692,6 +692,7 @@ le_result_t pa_flash_EraseBlock
     uint32_t peb, leb = blockIndex;
     le_result_t res;
     int rc;
+    bool retry;
 
     if( (!descPtr) || (descPtr->magic != desc) )
     {
@@ -703,53 +704,62 @@ le_result_t pa_flash_EraseBlock
         return LE_OUT_OF_RANGE;
     }
 
-    peb = leb;
-    if( descPtr->scanDone )
+    do
     {
-        if (leb >= PA_FLASH_MAX_LEB)
+        retry = false;
+        peb = leb;
+        if( descPtr->scanDone )
         {
-            return LE_OUT_OF_RANGE;
-        }
-        // LEB access, fetch the PEB linked to the LEB
-        peb = descPtr->lebToPeb[leb];
-        if( -1 == peb )
-        {
-            return LE_NOT_PERMITTED;
-        }
-    }
-
-    // Compute the block offset of the PEB and add the startOffset of the
-    // logical partition
-    eraseMe.start = (peb * descPtr->mtdInfo.eraseSize) + descPtr->mtdInfo.startOffset;
-    eraseMe.length = descPtr->mtdInfo.eraseSize;
-    rc = ioctl(descPtr->fd, MEMERASE, &eraseMe);
-    if( -1 == rc )
-    {
-        LE_ERROR("MTD %d: MEMERASE fails for block %u offset %x: %m",
-                 descPtr->mtdNum, peb, eraseMe.start);
-        if( (-1 == rc) && (EIO == errno) && descPtr->markBad )
-        {
-            // Retrieve the LEB if scanDone, else use directly the PEB
-            res = pa_flash_MarkBadBlock( desc, (descPtr->scanDone ? leb : peb) );
-            if( LE_OK != res )
+            if (leb >= PA_FLASH_MAX_LEB)
             {
-                return res;
+                return LE_OUT_OF_RANGE;
+            }
+            // LEB access, fetch the PEB linked to the LEB
+            peb = descPtr->lebToPeb[leb];
+            if( -1 == peb )
+            {
+                return LE_NOT_PERMITTED;
+            }
+        }
+
+        // Compute the block offset of the PEB and add the startOffset of the
+        // logical partition
+        eraseMe.start = (peb * descPtr->mtdInfo.eraseSize) + descPtr->mtdInfo.startOffset;
+        eraseMe.length = descPtr->mtdInfo.eraseSize;
+        rc = ioctl(descPtr->fd, MEMERASE, &eraseMe);
+        if( -1 == rc )
+        {
+            LE_ERROR("MTD %d: MEMERASE fails for block %u offset %x: %m",
+                     descPtr->mtdNum, peb, eraseMe.start);
+            if( (-1 == rc) && (EIO == errno) && descPtr->markBad )
+            {
+                // Retrieve the LEB if scanDone, else use directly the PEB
+                res = pa_flash_MarkBadBlock( desc, (descPtr->scanDone ? leb : peb) );
+                if( LE_OK != res )
+                {
+                    return res;
+                }
+                if( descPtr->scanDone )
+                {
+                    retry = true;
+                }
+            }
+            else
+            {
+                return (EIO == errno) ? LE_IO_ERROR : LE_FAULT;
             }
         }
         else
         {
-            return (EIO == errno) ? LE_IO_ERROR : LE_FAULT;
+            if( -1 == lseek( descPtr->fd, (off_t)eraseMe.start, SEEK_SET ) )
+            {
+                LE_ERROR("MTD %d: lseek fails at peb %u offset %x: %m",
+                         descPtr->mtdNum, peb, eraseMe.start);
+                return (EIO == errno) ? LE_IO_ERROR : LE_FAULT;
+            }
         }
     }
-    else
-    {
-        if( -1 == lseek( descPtr->fd, (off_t)eraseMe.start, SEEK_SET ) )
-        {
-            LE_ERROR("MTD %d: lseek fails at peb %u offset %x: %m",
-                     descPtr->mtdNum, peb, eraseMe.start);
-            return (EIO == errno) ? LE_IO_ERROR : LE_FAULT;
-        }
-    }
+    while( retry );
 
     return LE_OK;
 }
@@ -898,7 +908,7 @@ le_result_t pa_flash_Read
     pa_flash_MtdDesc_t *descPtr = (pa_flash_MtdDesc_t *)desc;
     uint32_t peb;
     off_t pOffset;
-    int rc;
+    int rc, rdSize, totalSize;
     le_result_t res;
 
     if( (!descPtr) || (descPtr->magic != desc) || (!dataPtr) )
@@ -911,23 +921,37 @@ le_result_t pa_flash_Read
         return LE_OUT_OF_RANGE;
     }
 
-    res = GetBlock( descPtr, &pOffset, &peb );
-    if( LE_OK != res )
-    {
-        return res;
-    }
-
+    totalSize = 0;
     do
     {
-        rc = read(descPtr->fd, dataPtr, dataSize);
-        if( (-1 == rc) && (EINTR != errno) )
+        res = GetBlock( descPtr, &pOffset, &peb );
+        if( LE_OK != res )
         {
-            LE_ERROR("MTD %d: read fails (%d) for peb %u offset %lx: %m",
-                     descPtr->mtdNum, rc, peb, pOffset);
-            return (EIO == errno) ? LE_IO_ERROR : LE_FAULT;
+            return res;
         }
+
+        rdSize = descPtr->mtdInfo.eraseSize - (pOffset & (descPtr->mtdInfo.eraseSize - 1));
+        if( rdSize > (dataSize - totalSize) )
+        {
+            rdSize = dataSize - totalSize;
+        }
+
+        LE_DEBUG("MTD %d : peb %u pOffset %lx rdSize %d totalSize %d",
+                 descPtr->mtdNum, peb, pOffset, rdSize, totalSize);
+        do
+        {
+            rc = read(descPtr->fd, dataPtr + totalSize, rdSize);
+            if( (-1 == rc) && (EINTR != errno) )
+            {
+                LE_ERROR("MTD %d: read fails (%d) for peb %u offset %lx: %m",
+                         descPtr->mtdNum, rc, peb, pOffset);
+                return (EIO == errno) ? LE_IO_ERROR : LE_FAULT;
+            }
+        }
+        while( rc == -1 );
+        totalSize += rc;
     }
-    while( rc != dataSize );
+    while( totalSize != dataSize );
 
     return LE_OK;
 }

@@ -905,7 +905,7 @@ le_result_t partition_GetSwifotaOffsetPartition
     {
         return LE_FORMAT_ERROR;
     }
-    res = pa_flash_Tell(MtdFd, NULL, NULL, offsetPtr);
+    res = pa_flash_Tell(MtdFd, NULL, offsetPtr);
     LE_DEBUG("offsetPtr 0x%lx InOffset 0x%zx", *offsetPtr, PartitionPtr->inOffset);
     if( LE_OK == res )
     {
@@ -934,7 +934,7 @@ le_result_t partition_SetSwifotaOffsetPartition
         return LE_FORMAT_ERROR;
     }
     offset += (IMG_BLOCK_OFFSET * FlashInfoPtr->eraseSize);
-    return pa_flash_SeekAtAbsOffset(MtdFd, offset);
+    return pa_flash_SeekAtOffset(MtdFd, offset);
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -1034,10 +1034,15 @@ le_result_t partition_OpenSwifotaPartition
         // current partition.
         if (offset == 0)
         {
-            ctxPtr->logicalBlock = IMG_BLOCK_OFFSET;
+            int nbPebMetaData = 0;
+
+            ctxPtr->logicalBlock = 0;
             ctxPtr->phyBlock = 0;
             *fullImageCrc32Ptr = LE_CRC_START_CRC32;
             iblk = 0;
+
+            // Go back physical access as we really need to deal with "real" PEB
+            (void)pa_flash_Unscan(MtdFd);
 
             // Erase blocks
             for (; iblk < FlashInfoPtr->nbLeb; iblk++)
@@ -1062,12 +1067,31 @@ le_result_t partition_OpenSwifotaPartition
                         LE_ERROR("Fails to erase block %d: res=%d", iblk, res);
                         goto error;
                     }
-                    if ((!ctxPtr->phyBlock) && (iblk >= ctxPtr->logicalBlock))
+                    if ((LE_OK != (res = pa_flash_CheckBadBlock(MtdFd, iblk, &isBad)))
+                        && (res != LE_NOT_PERMITTED))
+                    {
+                        LE_ERROR("Fails to check bad block %d", iblk);
+                        goto error;
+                    }
+                    if (isBad)
+                    {
+                        LE_WARN("Skipping bad block %d", iblk);
+                    }
+                    else if( nbPebMetaData < IMG_BLOCK_OFFSET )
+                    {
+                        nbPebMetaData++;
+                    }
+                    else if ((!ctxPtr->phyBlock) && (iblk >= ctxPtr->logicalBlock))
                     {
                         ctxPtr->phyBlock = iblk;
+                        ctxPtr->logicalBlock = iblk;
                     }
                 }
             }
+            LE_INFO("phyBlock = %u, logicalBlock = %u", ctxPtr->phyBlock, ctxPtr->logicalBlock);
+
+            // Go to logical mode, as we no more require to deal with real PEB.
+            (void)pa_flash_Scan(MtdFd, NULL);
         }
         else
         {
@@ -1224,7 +1248,7 @@ le_result_t partition_ComputeDataCrc32SwifotaPartition
     }
     else
     {
-        res = pa_flash_Tell(mtdFd, NULL, NULL, &atOffset);
+        res = pa_flash_Tell(mtdFd, NULL, &atOffset);
         if( LE_OK != res )
         {
             LE_ERROR("pa_flash_Tell fails: %d", res);
@@ -1233,22 +1257,39 @@ le_result_t partition_ComputeDataCrc32SwifotaPartition
     }
 
     rdoffset = inOffset + (IMG_BLOCK_OFFSET * flashInfoPtr->eraseSize);
+    res = pa_flash_SeekAtOffset(mtdFd, rdoffset);
     LE_DEBUG("Seek at 0x%lx", rdoffset);
-    res = pa_flash_SeekAtAbsOffset(mtdFd, rdoffset);
     if( LE_OK != res )
     {
-        LE_ERROR("pa_flash_SeekAtAbsOffset fails: %d", res);
+        LE_ERROR("pa_flash_SeekAtOffset fails: %d", res);
         return res;
     }
+    res = pa_flash_Tell(mtdFd, NULL, &rdoffset);
+    if( LE_OK != res )
+    {
+        LE_ERROR("pa_flash_Tell fails: %d", res);
+        return res;
+    }
+    LE_DEBUG("Tell at 0x%lx", rdoffset);
     blockPtr = (uint8_t*)le_mem_ForceAlloc(*ctxPtr->flashPoolPtr);
     baseSize = flashInfoPtr->eraseSize - (inOffset & (flashInfoPtr->eraseSize - 1));
     for( rdsize = 0; rdsize < size; rdsize += crcsize, rdoffset += crcsize )
     {
         crcsize = ((size - rdsize) >= baseSize ? baseSize : size - rdsize);
+        if( crcsize > flashInfoPtr->eraseSize )
+        {
+            crcsize = flashInfoPtr->eraseSize;
+        }
         LE_DEBUG("size %u rdsize %zu crcsize %zu baseSize %zu rdoffset 0x%lx atOffset 0x%lx",
                  size, rdsize, crcsize, baseSize, rdoffset, atOffset);
         if( rdoffset < atOffset )
         {
+            res = pa_flash_SeekAtOffset(mtdFd, rdoffset);
+            if( LE_OK != res )
+            {
+                LE_ERROR("pa_flash_SeekAtOffset fails: %d", res);
+                return res;
+            }
             crcRes = pa_flash_Read(mtdFd, blockPtr, baseSize);
             if( LE_OK != crcRes )
             {
@@ -1308,10 +1349,10 @@ out:
     else
     {
         // Restore offset at the last position of the UBI partition
-        res = pa_flash_SeekAtAbsOffset(MtdFd, atOffset);
+        res = pa_flash_SeekAtOffset(MtdFd, atOffset);
         if( LE_OK != res )
         {
-            LE_ERROR("pa_flash_SeekAtAbsOffset fails: %d", res);
+            LE_ERROR("pa_flash_SeekAtOffset fails: %d", res);
             return res;
         }
     }
@@ -1429,7 +1470,7 @@ le_result_t partition_OpenUbiSwifotaPartition
     off_t mtdOffset;
     le_result_t res;
 
-    res = pa_flash_Tell(MtdFd, NULL, NULL, &mtdOffset);
+    res = pa_flash_Tell(MtdFd, NULL, &mtdOffset);
     if( LE_OK != res )
     {
         LE_ERROR("pa_flash_Tell() fails: %d", res);
@@ -1540,10 +1581,10 @@ le_result_t partition_CloseUbiSwifotaPartition
         LE_ERROR("pa_flash_Scan fails: %d", res);
         return res;
     }
-    res = pa_flash_SeekAtAbsOffset(MtdFd, atOffset & ~(FlashInfoPtr->eraseSize - 1));
+    res = pa_flash_SeekAtOffset(MtdFd, atOffset & ~(FlashInfoPtr->eraseSize - 1));
     if( LE_OK != res )
     {
-        LE_ERROR("pa_flash_SeekAtAbsOffset fails: %d", res);
+        LE_ERROR("pa_flash_SeekAtOffset fails: %d", res);
         return res;
     }
     PartitionPtr->inOffset = atOffset & (FlashInfoPtr->eraseSize - 1);
@@ -1560,13 +1601,13 @@ le_result_t partition_CloseUbiSwifotaPartition
         LE_ERROR("pa_flash_Erase fails: %d", res);
         return res;
     }
-    res = pa_flash_SeekAtAbsOffset(MtdFd, atOffset & ~(FlashInfoPtr->eraseSize - 1));
+    res = pa_flash_SeekAtOffset(MtdFd, atOffset & ~(FlashInfoPtr->eraseSize - 1));
     if( LE_OK != res )
     {
-        LE_ERROR("pa_flash_SeekAtAbsOffset fails: %d", res);
+        LE_ERROR("pa_flash_SeekAtOffset fails: %d", res);
         return res;
     }
-    res = pa_flash_Tell(MtdFd, NULL, NULL, &atOffset);
+    res = pa_flash_Tell(MtdFd, NULL, &atOffset);
     if( LE_OK != res )
     {
         LE_ERROR("pa_flash_Tell fails: %d", res);
@@ -1610,10 +1651,10 @@ le_result_t partition_ComputeUbiCrc32SwifotaPartition
         return LE_BUSY;
     }
     LE_DEBUG("Seek at 0x%lx", PartitionPtr->ubiOffset);
-    res = pa_flash_SeekAtAbsOffset(MtdFd, PartitionPtr->ubiOffset);
+    res = pa_flash_SeekAtOffset(MtdFd, PartitionPtr->ubiOffset);
     if( LE_OK != res )
     {
-        LE_ERROR("pa_flash_SeekAtAbsOffset fails: %d", res);
+        LE_ERROR("pa_flash_SeekAtOffset fails: %d", res);
         return res;
     }
     blockPtr = (uint8_t*)le_mem_ForceAlloc(*ctxPtr->flashPoolPtr);
@@ -1639,10 +1680,10 @@ le_result_t partition_ComputeUbiCrc32SwifotaPartition
     le_mem_Release( blockPtr );
 
     // Restore offset at the last position of the UBI partition
-    res = pa_flash_SeekAtAbsOffset(MtdFd, atOffset);
+    res = pa_flash_SeekAtOffset(MtdFd, atOffset);
     if( LE_OK != res )
     {
-        LE_ERROR("pa_flash_SeekAtAbsOffset fails: %d", res);
+        LE_ERROR("pa_flash_SeekAtOffset fails: %d", res);
         return res;
     }
     LE_INFO("Computed CRC32: 0x%08x Size %zu", crc32, size);
@@ -1923,7 +1964,7 @@ le_result_t partition_ComputeUbiVolumeCrc32SwifotaPartition
     {
         return LE_BUSY;
     }
-    res = pa_flash_Tell(MtdFd, NULL, NULL, &atOffset);
+    res = pa_flash_Tell(MtdFd, NULL, &atOffset);
     if( LE_OK != res )
     {
         LE_ERROR("pa_flash_Tell fails: %d", res);
@@ -1973,10 +2014,10 @@ le_result_t partition_ComputeUbiVolumeCrc32SwifotaPartition
     le_mem_Release( blockPtr );
 
     // Restore offset at the last position of the UBI partition
-    res = pa_flash_SeekAtAbsOffset(MtdFd, atOffset);
+    res = pa_flash_SeekAtOffset(MtdFd, atOffset);
     if( LE_OK != res )
     {
-        LE_ERROR("pa_flash_SeekAtAbsOffset fails: %d", res);
+        LE_ERROR("pa_flash_SeekAtOffset fails: %d", res);
         return res;
     }
     LE_INFO("Computed: CRC32 0x%08x Size %zu Full CRC32 0x%08x Full Size %zu",
@@ -2018,8 +2059,12 @@ le_result_t partition_WriteMetaData
     bool forceClose                  ///< [IN] Force close of device and resources
 )
 {
-    int mtdNum;
-    le_result_t ret = LE_OK;
+    uint32_t iblk = 0, nblk = 0, mdblk[2] = { 0, 0 };
+    bool isBad;
+    uint8_t data[MtdEraseSize];
+    pa_flash_Info_t *flashInfoPtr;
+    pa_flash_Desc_t mtdFd = NULL;
+    le_result_t ret;
 
     if (forceClose)
     {
@@ -2035,83 +2080,94 @@ le_result_t partition_WriteMetaData
         return LE_FAULT;
     }
 
-    // Static variables definition
-    static pa_flash_Info_t *FlashInfoPtr;  // MTD information of the current MTD
-    static pa_flash_Desc_t MtdFd = NULL; // File descriptor for MTD operations
+    if( -1 == MtdNumSwifota )
+    {
+        LE_CRIT("Not initialized");
+        return LE_FAULT;
+    }
+
     const cwe_Header_t *hdrPtr = ctxPtr->cweHdrPtr;
 
-    LE_INFO ("Image type %"PRIu32" len %zu offset 0x%zx", hdrPtr->imageType, length, offset);
+    LE_INFO ("MTD %d: Writing from CWE image %d", MtdNumSwifota, hdrPtr->imageType );
 
-    if (NULL == MtdFd)
+    if (LE_OK != partition_CheckIfMounted( MtdNumSwifota ))
     {
-        int iblk = 0;
-        le_result_t res;
+        LE_ERROR("MTD %d is mounted", MtdNumSwifota);
+        goto error;
+    }
 
-        mtdNum = partition_GetMtdFromImageTypeOrName(0, "swifota", &MtdNamePtr);
+    if (LE_OK != pa_flash_Open( MtdNumSwifota,
+                                PA_FLASH_OPENMODE_WRITEONLY | PA_FLASH_OPENMODE_MARKBAD,
+                                &mtdFd,
+                                &flashInfoPtr ))
+    {
+        LE_ERROR("Fails to open MTD %d", MtdNumSwifota );
+        goto error;
+    }
 
-        if (-1 == mtdNum)
+    for( iblk = 0, nblk = 0; (nblk < IMG_BLOCK_OFFSET) && (iblk < flashInfoPtr->nbLeb); iblk++ )
+    {
+        if (LE_OK != pa_flash_CheckBadBlock(mtdFd, iblk, &isBad))
         {
-            LE_ERROR( "Unable to find a valid mtd for image type \"swifota\"" );
-            goto error;
-        }
-        LE_INFO ("Writing \"%s\" (mtd%d) from CWE image %d",
-                 MtdNamePtr, mtdNum, hdrPtr->imageType );
-
-        if (LE_OK != partition_CheckIfMounted( mtdNum ))
-        {
-            LE_ERROR("MTD %d is mounted", mtdNum);
-            goto error;
-        }
-
-        if (LE_OK != pa_flash_Open( mtdNum,
-                                    PA_FLASH_OPENMODE_WRITEONLY | PA_FLASH_OPENMODE_MARKBAD,
-                                    &MtdFd,
-                                    &FlashInfoPtr ))
-        {
-            LE_ERROR("Fails to open MTD %d", mtdNum );
+            LE_ERROR("MTD %d: Fails to check bad block at %d", MtdNumSwifota, iblk);
             goto error;
         }
 
-        res = pa_flash_EraseBlock( MtdFd, 0);
-        if ((LE_OK != res) && (res != LE_NOT_PERMITTED))
+        if( !isBad )
         {
-            LE_ERROR("Fails to erase block %d: res=%d", iblk, res);
-            goto error;
-        }
-
-        res = pa_flash_EraseBlock( MtdFd, 1);
-        if ((LE_OK != res) && (res != LE_NOT_PERMITTED))
-        {
-            LE_ERROR("Fails to erase block %d: res=%d", iblk, res);
-            goto error;
-        }
-
-        if (LE_OK != pa_flash_SeekAtOffset(MtdFd, 0))
-        {
-            LE_ERROR("Fails to seek block at %d", iblk);
-            goto error;
-        }
-        uint8_t Data[FlashInfoPtr->eraseSize];
-        memset(Data, 0x00, FlashInfoPtr->eraseSize);
-        memcpy(Data, dataPtr, length);
-
-        if (LE_OK != pa_flash_Write( MtdFd, Data, FlashInfoPtr->eraseSize))
-        {
-            LE_ERROR( "fwrite to nandwrite fails: %m" );
-            goto error;
+            if (LE_OK != pa_flash_EraseBlock(mtdFd, iblk))
+            {
+                LE_ERROR( "MTD %d: Failed to erase peb %u", MtdNumSwifota, iblk );
+                goto error;
+            }
+            if (LE_OK != pa_flash_CheckBadBlock(mtdFd, iblk, &isBad))
+            {
+                LE_ERROR("MTD %d: Fails to check bad block at %d", MtdNumSwifota, iblk);
+                goto error;
+            }
+            if( !isBad )
+            {
+                mdblk[nblk++] = iblk;
+            }
         }
     }
 
-    return ret;
+    if( IMG_BLOCK_OFFSET != nblk )
+    {
+        LE_CRIT("MTD %d: Failed to find to two good blocks for meta-data", MtdNumSwifota);
+        goto error;
+    }
+
+    memset(data, 0x00, sizeof(data));
+    memcpy(data, dataPtr, length);
+
+    LE_INFO("MTD %d: Writing meta data to peb %u", MtdNumSwifota, mdblk[0]);
+    if (LE_OK != pa_flash_WriteAtBlock( mtdFd, mdblk[0], data, sizeof(data)))
+    {
+        LE_ERROR( "MTD %d: Failed to write peb %u", MtdNumSwifota, mdblk[0] );
+        goto error;
+    }
+
+    if (LE_OK != pa_flash_Close( mtdFd ))
+    {
+        LE_ERROR( "MTD %d: Failed to close the partition", MtdNumSwifota );
+        goto error;
+    }
+
+    return LE_OK;
 
 error:
     ret = LE_OK;
+    if (mtdFd)
+    {
+        ret = pa_flash_Close( mtdFd );
+    }
     if (MtdFd)
     {
         ret = pa_flash_Close( MtdFd );
         MtdFd = NULL;
+        MtdNamePtr = NULL;
     }
-    MtdNamePtr = NULL;
     partition_Reset();
     return (forceClose ? ret : LE_FAULT);
 }
@@ -2140,8 +2196,7 @@ void partition_Initialize
 
     MtdNumSwifota = (uint32_t)mtdNum;
     MtdEraseSize = flashInfo.eraseSize;
-    PartitionPool = le_mem_CreatePool("PartitionPool",
-                                     sizeof(Partition_t) + MtdEraseSize);
+    PartitionPool = le_mem_CreatePool("PartitionPool", sizeof(Partition_t) + MtdEraseSize);
     le_mem_ExpandPool(PartitionPool, 1);
 
     partition_Reset();
