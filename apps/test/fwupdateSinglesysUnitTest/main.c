@@ -16,6 +16,7 @@
 
 #define FILE_PATH      "/fwupdate/dwl_status.nfo"
 #define TEST_FILE      "/tmp/test_file.txt"
+#define KEYSTORE_CWE   "../data/keystore.cwe"
 #define LS_CWE         "../data/ls.cwe"
 #define CP_CWE         "../data/cp.cwe"
 #define LS2CP_CWE      "../data/ls2cp.cwe"
@@ -215,7 +216,6 @@ static void Testpa_fwupdate_DownloadDelta
     LE_INFO ("======== Test: pa_fwupdate_DownloadDelta ========");
 
     LE_INFO ("======== Test: Donwload LS ========");
-
     fd = open(LS_CWE, O_RDONLY);
     LE_ASSERT(fd >= 0);
     LE_TEST(LE_OK == pa_fwupdate_Download(fd));
@@ -266,6 +266,12 @@ static void Testpa_fwupdate_DownloadDelta
     LE_TEST(LE_OK == pa_fwupdate_Download(fd));
     close(fd);
     ApplySwifotaToBootPartition();
+
+    LE_INFO ("======== Test: Donwload KEYSTORE ========");
+    fd = open(KEYSTORE_CWE, O_RDONLY);
+    LE_ASSERT(fd >= 0);
+    LE_TEST(LE_OK == pa_fwupdate_Download(fd));
+    close(fd);
 }
 
 //--------------------------------------------------------------------------------------------------
