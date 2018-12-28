@@ -88,7 +88,8 @@ typedef enum
     CWE_IMAGE_TYPE_CUS2,                          ///<  User image image 2, for customer2 partition
     CWE_IMAGE_TYPE_HASH,                          ///<  Hash
     CWE_IMAGE_TYPE_META,                          ///<  Meta CWE header for delta update
-    CWE_IMAGE_TYPE_MAX  = CWE_IMAGE_TYPE_META,    ///<  End of list
+    CWE_IMAGE_TYPE_KEYS,                          ///<  OEM keystore file
+    CWE_IMAGE_TYPE_MAX  = CWE_IMAGE_TYPE_KEYS,    ///<  End of list
     CWE_IMAGE_TYPE_COUNT,                         ///<  Number of entries in list
 }
 cwe_ImageType_t;

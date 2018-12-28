@@ -1263,7 +1263,17 @@ le_result_t partition_ComputeDataCrc32SwifotaPartition
             {
                 LE_DEBUG("rdoffset 0x%lx atOffset 0x%lx Copy PartitionPtr->dataPtr at 0x%zx",
                          rdoffset, atOffset, PartitionPtr->inOffset);
-                memcpy(blockPtr, PartitionPtr->dataPtr, PartitionPtr->inOffset);
+                if( (atOffset == (IMG_BLOCK_OFFSET * flashInfoPtr->eraseSize)) &&
+                    (rdoffset == (atOffset + CWE_HEADER_SIZE)) )
+                {
+                    // Skip the first header as it is not expected inside the full checksum
+                    memcpy(blockPtr, PartitionPtr->dataPtr + CWE_HEADER_SIZE,
+                           PartitionPtr->inOffset - CWE_HEADER_SIZE);
+                }
+                else
+                {
+                    memcpy(blockPtr, PartitionPtr->dataPtr, PartitionPtr->inOffset);
+                }
                 crcRes = LE_OK;
             }
             else
