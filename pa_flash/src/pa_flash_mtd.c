@@ -1063,6 +1063,7 @@ le_result_t pa_flash_Write
                 {
                     dataPtr += descPtr->mtdInfo.writeSize;
                     nbWrite--;
+                    tryWrite = false;
                 }
             }
             if( remain )
