@@ -739,6 +739,11 @@ le_result_t pa_flash_EraseBlock
                 {
                     return res;
                 }
+                if( descPtr->ubiDontFetchPeb )
+                {
+                    LE_ERROR("MTD %d: PEB %u is no more available for UBI", descPtr->mtdNum, peb);
+                    return LE_UNAVAILABLE;
+                }
                 if( descPtr->scanDone )
                 {
                     retry = true;

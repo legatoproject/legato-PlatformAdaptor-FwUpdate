@@ -580,7 +580,7 @@ static le_result_t GetNewBlock
 
         for( lebIndex = 0; (lebIndex < infoPtr->nbBlk); lebIndex++ )
         {
-            if( descPtr->ubiLebToPeb[lebIndex] == ieb )
+            if( descPtr->ubiLebToMtdLeb[lebIndex] == ieb )
             {
                 lebIndex = INVALID_PEB;
                 break;
@@ -726,11 +726,11 @@ static le_result_t UpdateVidBlock
 
     if( descPtr->vtblPtr->vol_type == UBI_VID_STATIC )
     {
-        if (INVALID_PEB == descPtr->ubiLebToPeb[blockIndex])
+        if (INVALID_PEB == descPtr->ubiLebToMtdLeb[blockIndex])
         {
             return LE_OUT_OF_RANGE;
         }
-        blkOff = descPtr->ubiLebToPeb[blockIndex] * descPtr->mtdInfo.eraseSize;
+        blkOff = descPtr->ubiLebToMtdLeb[blockIndex] * descPtr->mtdInfo.eraseSize;
         res = FlashSeekAtOffset( desc, blkOff );
         if (LE_OK != res)
         {
@@ -804,7 +804,7 @@ static le_result_t UpdateAllVidBlock
     {
         for( blk = 0;
              (reservedPebs) && (blk < (reservedPebs - 1)) &&
-             (INVALID_PEB != descPtr->ubiLebToPeb[blk]);
+             (INVALID_PEB != descPtr->ubiLebToMtdLeb[blk]);
              blk++ )
         {
             res = UpdateVidBlock(desc, blk, blockPtr, reservedPebs, UBI_NO_SIZE);
@@ -823,12 +823,12 @@ static le_result_t UpdateAllVidBlock
     }
     for( blk = reservedPebs;
          (blk < be32toh(descPtr->vtblPtr->reserved_pebs))
-             && (INVALID_PEB != descPtr->ubiLebToPeb[blk]);
+             && (INVALID_PEB != descPtr->ubiLebToMtdLeb[blk]);
          blk++ )
     {
-        blkOff = descPtr->ubiLebToPeb[blk] * descPtr->mtdInfo.eraseSize;
+        blkOff = descPtr->ubiLebToMtdLeb[blk] * descPtr->mtdInfo.eraseSize;
         LE_DEBUG("Erasing block and updating EC in %u [peb %u]",
-                 blk, descPtr->ubiLebToPeb[blk]);
+                 blk, descPtr->ubiLebToMtdLeb[blk]);
         res = FlashSeekAtOffset( desc, blkOff );
         if (LE_OK != res)
         {
@@ -856,7 +856,7 @@ static le_result_t UpdateAllVidBlock
         {
             return res;
         }
-        descPtr->ubiLebToPeb[blk] = INVALID_PEB;
+        descPtr->ubiLebToMtdLeb[blk] = INVALID_PEB;
     }
     return LE_OK;
 }
@@ -1328,7 +1328,7 @@ le_result_t pa_flash_ScanUbiForVolumesAtOffset
 
     if (descPtr->vtblPtr)
     {
-        memset(descPtr->ubiLebToPeb, -1, sizeof(descPtr->ubiLebToPeb));
+        memset(descPtr->ubiLebToMtdLeb, -1, sizeof(descPtr->ubiLebToMtdLeb));
         goto scanDone;
     }
 
@@ -1344,7 +1344,7 @@ le_result_t pa_flash_ScanUbiForVolumesAtOffset
 
     memset(descPtr->vtbl, 0, sizeof(struct ubi_vtbl_record) * PA_FLASH_UBI_MAX_VOLUMES);
     memset(descPtr->vtblPeb, -1, sizeof(descPtr->vtblPeb));
-    memset(descPtr->ubiLebToPeb, -1, sizeof(descPtr->ubiLebToPeb));
+    memset(descPtr->ubiLebToMtdLeb, -1, sizeof(descPtr->ubiLebToMtdLeb));
     for( peb = descPtr->ubiBasePeb; peb < infoPtr->nbLeb; peb++ )
     {
         LE_DEBUG("Check if bad block at peb %u", peb);
@@ -1512,7 +1512,7 @@ le_result_t pa_flash_ScanUbiAtOffset
     descPtr->vtblPtr = NULL;
     memset(descPtr->vtbl, 0, sizeof(struct ubi_vtbl_record) * PA_FLASH_UBI_MAX_VOLUMES);
     memset(descPtr->vtblPeb, -1, sizeof(descPtr->vtblPeb));
-    memset(descPtr->ubiLebToPeb, -1, sizeof(descPtr->ubiLebToPeb));
+    memset(descPtr->ubiLebToMtdLeb, -1, sizeof(descPtr->ubiLebToMtdLeb));
 
     if( -1 == UpdateUbiAbsOffset( descPtr, offset ) )
     {
@@ -1580,7 +1580,7 @@ le_result_t pa_flash_ScanUbiAtOffset
                  (be32toh(vidHeader.vol_id) == ubiVolId))
         {
             descPtr->ubiDataOffset = be32toh(ecHeader.data_offset);
-            descPtr->ubiLebToPeb[be32toh(vidHeader.lnum)] = peb;
+            descPtr->ubiLebToMtdLeb[be32toh(vidHeader.lnum)] = peb;
             if( UBI_VID_STATIC == vidHeader.vol_type )
             {
                 ubiVolSize += be32toh(vidHeader.data_size);
@@ -1627,7 +1627,7 @@ le_result_t pa_flash_ScanUbiAtOffset
                  (i == ubiVolId) && (j < be32toh(descPtr->vtbl[i].reserved_pebs));
                  j++ )
             {
-                LE_DEBUG("%u ", descPtr->ubiLebToPeb[j]);
+                LE_DEBUG("%u ", descPtr->ubiLebToMtdLeb[j]);
             }
         }
     }
@@ -1697,7 +1697,7 @@ le_result_t pa_flash_UnscanUbi
     descPtr->vtblPtr = NULL;
     memset(descPtr->vtbl, 0, sizeof(struct ubi_vtbl_record) * PA_FLASH_UBI_MAX_VOLUMES);
     memset(descPtr->vtblPeb, -1, sizeof(descPtr->vtblPeb));
-    memset(descPtr->ubiLebToPeb, -1, sizeof(descPtr->ubiLebToPeb));
+    memset(descPtr->ubiLebToMtdLeb, -1, sizeof(descPtr->ubiLebToMtdLeb));
     infoPtr->ubiPebFreeCount = 0;
     infoPtr->ubiVolFreeSize = 0;
     descPtr->ubiAbsOffset = 0;
@@ -1752,7 +1752,7 @@ le_result_t pa_flash_ReadUbiAtBlock
     {
         return LE_OUT_OF_RANGE;
     }
-    peb = descPtr->ubiLebToPeb[leb];
+    peb = descPtr->ubiLebToMtdLeb[leb];
     if ( peb == -1 )
     {
         return LE_NOT_PERMITTED;
@@ -1858,7 +1858,7 @@ le_result_t pa_flash_ReadUbiAtOffset
         }
 
         // Get the physical erase block given a logical erase block
-        peb = descPtr->ubiLebToPeb[leb];
+        peb = descPtr->ubiLebToMtdLeb[leb];
         if (peb == -1)
         {
             res = LE_NOT_PERMITTED;
@@ -2042,9 +2042,9 @@ le_result_t pa_flash_WriteUbiAtBlock
         vidHdrPtr = (struct ubi_vid_hdr *)(blockPtr + be32toh(ecHdrPtr->vid_hdr_offset));
         CreateVidHeader(descPtr, vidHdrPtr, blk, reservedPebs);
         descPtr->vtblPtr->reserved_pebs = htobe32(reservedPebs);
-        descPtr->ubiLebToPeb[blk] = ieb;
+        descPtr->ubiLebToMtdLeb[blk] = ieb;
         LE_DEBUG3(blockPtr);
-        blkOff = descPtr->ubiLebToPeb[blk] * infoPtr->eraseSize;
+        blkOff = descPtr->ubiLebToMtdLeb[blk] * infoPtr->eraseSize;
         res = FlashSeekAtOffset( desc, blkOff );
         if (LE_OK != res)
         {
@@ -2061,7 +2061,7 @@ le_result_t pa_flash_WriteUbiAtBlock
         {
             res = GetNewBlock( desc, blockPtr, &eraseCount, &newBlk );
         }
-        else if( INVALID_PEB == descPtr->ubiLebToPeb[blk] )
+        else if( INVALID_PEB == descPtr->ubiLebToMtdLeb[blk] )
         {
             res = GetNewBlock( desc, blockPtr, &eraseCount, &newBlk );
             if( LE_OK != res )
@@ -2075,9 +2075,9 @@ le_result_t pa_flash_WriteUbiAtBlock
         }
         if( LE_OK != res )
         {
-            blkOff = descPtr->ubiLebToPeb[blk] * infoPtr->eraseSize;
+            blkOff = descPtr->ubiLebToMtdLeb[blk] * infoPtr->eraseSize;
             LE_DEBUG("read UBI block : LEB %d PEB %d (at %lx)",
-                     blk, descPtr->ubiLebToPeb[blk], blkOff);
+                     blk, descPtr->ubiLebToMtdLeb[blk], blkOff);
             LE_DEBUG("Read blk %d, size %lx at %lx",
                     blk, dataOffset, blkOff );
             res = FlashSeekAtOffset( desc, blkOff );
@@ -2103,12 +2103,12 @@ le_result_t pa_flash_WriteUbiAtBlock
             }
             else
             {
-                if( INVALID_PEB != descPtr->ubiLebToPeb[blk] )
+                if( INVALID_PEB != descPtr->ubiLebToMtdLeb[blk] )
                 {
-                    blkOff = descPtr->ubiLebToPeb[blk] * infoPtr->eraseSize;
+                    blkOff = descPtr->ubiLebToMtdLeb[blk] * infoPtr->eraseSize;
                     blkOff += infoPtr->writeSize;
                     LE_DEBUG("read UBI block : LEB %d PEB %d (at %lx)",
-                             blk, descPtr->ubiLebToPeb[blk], blkOff);
+                             blk, descPtr->ubiLebToMtdLeb[blk], blkOff);
                     LE_DEBUG("Read blk %d, size %lx at %lx",
                             blk, dataOffset, blkOff );
                     res = FlashSeekAtOffset( desc, blkOff );
@@ -2122,7 +2122,7 @@ le_result_t pa_flash_WriteUbiAtBlock
                     {
                         goto error;
                     }
-                    pebErase = descPtr->ubiLebToPeb[blk];
+                    pebErase = descPtr->ubiLebToMtdLeb[blk];
                 }
                 else
                 {
@@ -2131,8 +2131,8 @@ le_result_t pa_flash_WriteUbiAtBlock
                     CreateVidHeader(descPtr, vidHdrPtr, blk, be32toh(descPtr->vtblPtr->reserved_pebs));
                 }
             }
-            descPtr->ubiLebToPeb[blk] = newBlk;
-            blkOff = descPtr->ubiLebToPeb[blk] * infoPtr->eraseSize;
+            descPtr->ubiLebToMtdLeb[blk] = newBlk;
+            blkOff = descPtr->ubiLebToMtdLeb[blk] * infoPtr->eraseSize;
         }
     }
     ecHdrPtr = (struct ubi_ec_hdr *)blockPtr;
@@ -2254,7 +2254,7 @@ le_result_t pa_flash_AdjustUbiSize
     reservedPebs = (newSize + (dataSize - 1)) / dataSize;
     LE_DEBUG("Reducing UBI vol %u from %u to %u blocks[last %u] with newSize %zu",
              descPtr->ubiVolumeId, be32toh(descPtr->vtblPtr->reserved_pebs),
-             reservedPebs, descPtr->ubiLebToPeb[reservedPebs - 1], newSize);
+             reservedPebs, descPtr->ubiLebToMtdLeb[reservedPebs - 1], newSize);
     if( reservedPebs <= be32toh(descPtr->vtblPtr->reserved_pebs) )
     {
         uint32_t lastSize = newSize % dataSize;
@@ -3013,7 +3013,7 @@ le_result_t pa_flash_CreateUbiVolumeWithFlags
     infoPtr = &descPtr->mtdInfo;
     descPtr->ubiVolumeId = INVALID_UBI_VOLUME;
     descPtr->vtblPtr = NULL;
-    memset(descPtr->ubiLebToPeb, -1, sizeof(descPtr->ubiLebToPeb));
+    memset(descPtr->ubiLebToMtdLeb, -1, sizeof(descPtr->ubiLebToMtdLeb));
     infoPtr->ubiVolFreeSize = 0;
     infoPtr->ubi = false;
 
@@ -3086,7 +3086,7 @@ le_result_t pa_flash_CreateUbiVolumeWithFlags
         {
             goto error;
         }
-        descPtr->ubiLebToPeb[0] = volPeb;
+        descPtr->ubiLebToMtdLeb[0] = volPeb;
     }
 
     // Update the VTBL to register the new volume name at volume ID position
@@ -3230,7 +3230,7 @@ le_result_t pa_flash_DeleteUbiVolume
     for (leb = 0; leb < reservedPebs; leb++)
     {
         // Fetch the PEB corresponding to the LEB
-        peb = descPtr->ubiLebToPeb[leb];
+        peb = descPtr->ubiLebToMtdLeb[leb];
         if (-1 == peb)
         {
             LE_ERROR("LEB %u: Invalid PEB for volume %u", leb, ubiVolId);

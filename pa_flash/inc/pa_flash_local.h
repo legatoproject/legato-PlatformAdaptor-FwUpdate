@@ -25,8 +25,10 @@ typedef struct
     pa_flash_Info_t mtdInfo; ///< MTD information
     bool scanDone;           ///< The scan is done, use LEB translation for PEB access
     bool markBad;            ///< Mark bad block and use next to read/write...
+    bool ubiDontFetchPeb;    ///< Report LE_UNAVAILABLE and do not fetch for the new good PEB when
+                             ///< erase operation fails
     uint32_t lebToPeb[PA_FLASH_MAX_LEB]; ///< LEB to PEB translstion array (if scanDone)
-    uint32_t ubiLebToPeb[PA_FLASH_MAX_LEB]; ///< LEB to PEB translstion array (if scanDone)
+    uint32_t ubiLebToMtdLeb[PA_FLASH_MAX_LEB]; ///< LEB to MTD LEB translstion array (if UBI volume)
     uint32_t ubiVolumeId;    ///< UBI volume ID if UBI, 0xFFFFFFFFU otherwise
     uint32_t ubiVolumeSize;  ///< UBI volume Size if UBI and static volume, 0xFFFFFFFFU otherwise
     off_t ubiDataOffset;     ///< Offset of UBI data in the PEB
