@@ -1666,7 +1666,13 @@ static le_result_t ReadDwlStatus
     }
     else
     {
+        // If the download status file not found, query the status from the modem
         LE_INFO("Unable to access to %s!", EFS_DWL_STATUS_FILE);
+        result = pa_fwupdate_GetInternalUpdateStatus(statusPtr);
+        if (LE_OK != result)
+        {
+            LE_INFO("Can't retrieve the download status from QMI, err %s", LE_RESULT_TXT(result));
+        }
     }
 
     return LE_OK;
