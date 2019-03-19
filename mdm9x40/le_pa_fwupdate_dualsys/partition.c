@@ -943,7 +943,7 @@ le_result_t partition_WriteDataSBL
 )
 {
     int mtdNum;
-    pa_flash_Info_t flashInfo;
+    pa_flash_Info_t * flashInfoPtr;
     le_result_t res = LE_OK;
     int sblNbBlk = 0, sblMaxBlk, sblIdxBlk;
     pa_flash_Desc_t flashFd = NULL;
@@ -969,19 +969,29 @@ le_result_t partition_WriteDataSBL
         return LE_FAULT;
     }
 
-    if (LE_OK != pa_flash_GetInfo( mtdNum, &flashInfo, false, false ))
+    if (LE_OK != pa_flash_Open( mtdNum,
+                                PA_FLASH_OPENMODE_READWRITE | PA_FLASH_OPENMODE_MARKBAD,
+                                &flashFd,
+                                &flashInfoPtr ))
     {
         LE_ERROR( "Open MTD fails for MTD %d", mtdNum );
         return LE_FAULT;
     }
-    sblNbBlk = (hdrPtr->imageSize + (flashInfo.eraseSize - 1)) / flashInfo.eraseSize;
-    sblMaxBlk = flashInfo.nbBlk - sblNbBlk;
+
+    if (LE_OK != pa_flash_Scan( flashFd, NULL ))
+    {
+        LE_ERROR("Scan of MTD %d fails: %m", mtdNum );
+        goto error;
+    }
+
+    sblNbBlk = (hdrPtr->imageSize + (flashInfoPtr->eraseSize - 1)) / flashInfoPtr->eraseSize;
+    sblMaxBlk = flashInfoPtr->nbLeb - sblNbBlk;
 
     // Check that SBL is not greater than the max block for the partition.
-    if (sblNbBlk > (flashInfo.nbBlk / 2))
+    if (sblNbBlk > (flashInfoPtr->nbLeb / 2))
     {
         LE_ERROR("SBL is too big: %zu (nbBlock %zu)",
-                 ImageSize, (ImageSize / (size_t)flashInfo.eraseSize));
+                 ImageSize, (ImageSize / (size_t)flashInfoPtr->eraseSize));
         goto error;
     }
 
@@ -993,7 +1003,7 @@ le_result_t partition_WriteDataSBL
         // Allocate a block to store the SBL temporary image
         ImageSize = hdrPtr->imageSize;
         RawImagePtr = (uint8_t **) le_mem_ForceAlloc(ctxPtr->sblPool);
-        memset(RawImagePtr, 0, sizeof(uint8_t*) * (flashInfo.nbBlk / 2));
+        memset(RawImagePtr, 0, sizeof(uint8_t*) * (flashInfoPtr->nbBlk/ 2));
     }
 
     // Check that the chunk is inside the SBL temporary image
@@ -1011,17 +1021,17 @@ le_result_t partition_WriteDataSBL
     do
     {
         // Compute on what block the offsetToCopy belongs
-        sblIdxBlk = (offsetToCopy / flashInfo.eraseSize);
-        offsetToCopy = (offsetToCopy & (flashInfo.eraseSize - 1));
+        sblIdxBlk = (offsetToCopy / flashInfoPtr->eraseSize);
+        offsetToCopy = (offsetToCopy & (flashInfoPtr->eraseSize - 1));
         if (NULL == RawImagePtr[sblIdxBlk])
         {
             RawImagePtr[sblIdxBlk] = (uint8_t *) le_mem_ForceAlloc(*ctxPtr->flashPoolPtr);
-            memset( RawImagePtr[sblIdxBlk], PA_FLASH_ERASED_VALUE, flashInfo.eraseSize );
+            memset( RawImagePtr[sblIdxBlk], PA_FLASH_ERASED_VALUE, flashInfoPtr->eraseSize );
         }
 
-        if ((lengthToCopy + offsetToCopy - 1) > flashInfo.eraseSize)
+        if ((lengthToCopy + offsetToCopy - 1) > flashInfoPtr->eraseSize)
         {
-            lengthToCopy = flashInfo.eraseSize - offsetToCopy;
+            lengthToCopy = flashInfoPtr->eraseSize - offsetToCopy;
         }
 
         memcpy( RawImagePtr[sblIdxBlk] + offsetToCopy,
@@ -1029,7 +1039,7 @@ le_result_t partition_WriteDataSBL
                 lengthToCopy );
         dataPtr += lengthToCopy;
         lengthCopied += lengthToCopy;
-        offsetToCopy += ((sblIdxBlk * flashInfo.eraseSize) + lengthCopied);
+        offsetToCopy += ((sblIdxBlk * flashInfoPtr->eraseSize) + lengthCopied);
         lengthToCopy = (length - lengthCopied);
     }
     while (lengthToCopy);
@@ -1043,15 +1053,6 @@ le_result_t partition_WriteDataSBL
         int atMaxBlk = -1;
         int atOffset = -1;
         int pass = 0;
-
-        if (LE_OK != pa_flash_Open( mtdNum,
-                                    PA_FLASH_OPENMODE_READWRITE | PA_FLASH_OPENMODE_MARKBAD,
-                                    &flashFd,
-                                    NULL ))
-        {
-            LE_ERROR( "Open MTD fails for MTD %d", mtdNum );
-            return LE_FAULT;
-        }
 
         /* Fetch if a valid SBL exists and get its first block */
         for (sblBlk = 0; sblBlk <= sblMaxBlk; sblBlk++ )
@@ -1076,7 +1077,7 @@ le_result_t partition_WriteDataSBL
             LE_ERROR("No valid SBL signature found. Ignoring and assuming SBL at 0");
             sblBlk = 0;
         }
-        else if (sblBlk && (sblBlk < (flashInfo.nbBlk / 2)))
+        else if (sblBlk && (sblBlk < (flashInfoPtr->nbLeb / 2)))
         {
             // If SBL is a lower block, (0..3), SBL is assumed to be in low.
             // Update SBL base according to this.
@@ -1096,11 +1097,11 @@ le_result_t partition_WriteDataSBL
             // If SBL base is high, erase and flash the low before, and recopy to high
             // If SBL base is low, erase and flash the high before, and recopy to low
             // First block used as base to flash the SBL
-            atBlk = (!pass ? (sblBlk ? 0 : flashInfo.nbBlk / 2)
-                           : (sblBlk ? flashInfo.nbBlk / 2 : 0));
+            atBlk = (!pass ? (sblBlk ? 0 : flashInfoPtr->nbLeb / 2)
+                           : (sblBlk ? flashInfoPtr->nbLeb / 2 : 0));
 
             // Last block of the SBL half partition
-            atMaxBlk = atBlk + (flashInfo.nbBlk / 2);
+            atMaxBlk = atBlk + (flashInfoPtr->nbLeb / 2);
             nbBadBlk = 0;
             // Check and count bad blocks in half partition to ensure that there is enough
             // good blocks to flash the SBL
@@ -1108,7 +1109,7 @@ le_result_t partition_WriteDataSBL
             // SBL will be safely written
             for (sblBaseBlk = -1; atBlk < atMaxBlk; atBlk++)
             {
-                loff_t blkOff = atBlk * flashInfo.eraseSize;
+                loff_t blkOff = atBlk * flashInfoPtr->eraseSize;
 
                 if (LE_OK != pa_flash_CheckBadBlock( flashFd, atBlk, &isBad ))
                 {
@@ -1139,17 +1140,17 @@ le_result_t partition_WriteDataSBL
             // Not enougth block to flash the SBL
             if ((-1 == sblBaseBlk) ||
                 (sblBaseBlk > (atMaxBlk - sblNbBlk)) ||
-                (sblBaseBlk >= (SBL_MAX_BASE_IN_FIRST_2MB / flashInfo.eraseSize)) ||
-                (nbBadBlk > ((flashInfo.nbBlk / 2) - sblNbBlk)))
+                (sblBaseBlk >= (SBL_MAX_BASE_IN_FIRST_2MB / flashInfoPtr->eraseSize)) ||
+                (nbBadBlk > ((flashInfoPtr->nbLeb / 2) - sblNbBlk)))
             {
                 LE_CRIT("(%d)Not enough blocks to update the SBL: Aborting", pass);
                 LE_CRIT("(%d)Half nb blk %d, nb bad %d, SBL base %d, SBL nb blk %d",
-                        pass, (flashInfo.nbBlk / 2), nbBadBlk, sblBaseBlk, sblNbBlk);
+                        pass, (flashInfoPtr->nbLeb / 2), nbBadBlk, sblBaseBlk, sblNbBlk);
                 goto critical;
             }
 
             // Skip the first page to invalidate the SBL signature
-            atOffset = (sblBaseBlk * flashInfo.eraseSize) + flashInfo.writeSize;
+            atOffset = (sblBaseBlk * flashInfoPtr->eraseSize) + flashInfoPtr->writeSize;
 
             if (LE_OK != pa_flash_SeekAtOffset( flashFd, atOffset ))
             {
@@ -1157,12 +1158,13 @@ le_result_t partition_WriteDataSBL
                         atBlk, atOffset);
                 goto critical;
             }
-            writeSize = ((((sblNbBlk > 1) ? flashInfo.eraseSize : ImageSize)
-                          - flashInfo.writeSize)
-                         + (flashInfo.writeSize - 1)) &
-                ~(flashInfo.writeSize - 1);
+            writeSize = ((((sblNbBlk > 1) ? flashInfoPtr->eraseSize : ImageSize)
+                          - flashInfoPtr->writeSize)
+                         + (flashInfoPtr->writeSize - 1)) &
+                ~(flashInfoPtr->writeSize - 1);
+
             if (LE_OK != pa_flash_Write( flashFd,
-                                         (RawImagePtr[0] + flashInfo.writeSize),
+                                         (RawImagePtr[0] + flashInfoPtr->writeSize),
                                          writeSize ))
             {
                 LE_ERROR("(%d)pa_flash_Write fails: %m", pass);
@@ -1170,11 +1172,12 @@ le_result_t partition_WriteDataSBL
             }
             for (sblIdxBlk = 1; (sblIdxBlk < sblNbBlk) && RawImagePtr[sblIdxBlk]; sblIdxBlk++)
             {
-                writeSize = ((((sblIdxBlk * flashInfo.eraseSize) < ImageSize) ?
-                              flashInfo.eraseSize :
-                              ImageSize - (sblIdxBlk * flashInfo.eraseSize))
-                             + (flashInfo.writeSize - 1)) &
-                    ~(flashInfo.writeSize - 1);
+                writeSize = ((((sblIdxBlk * flashInfoPtr->eraseSize) < ImageSize) ?
+                              flashInfoPtr->eraseSize :
+                              ImageSize - (sblIdxBlk * flashInfoPtr->eraseSize))
+                             + (flashInfoPtr->writeSize - 1)) &
+                    ~(flashInfoPtr->writeSize - 1);
+
                 if (LE_OK != pa_flash_Write(flashFd, RawImagePtr[sblIdxBlk], writeSize))
                 {
                     LE_ERROR("(%d)pa_flash_Write: %m", pass);
@@ -1182,7 +1185,7 @@ le_result_t partition_WriteDataSBL
                 }
             }
 
-            atOffset = sblBaseBlk * flashInfo.eraseSize;
+            atOffset = sblBaseBlk * flashInfoPtr->eraseSize;
             if (LE_OK != pa_flash_SeekAtOffset( flashFd, atOffset ))
             {
                 LE_CRIT("pa_flash_SeekAtOffset fails for block %d, offset %d: %m",
@@ -1195,7 +1198,7 @@ le_result_t partition_WriteDataSBL
             {
                 *isFlashedPtr = true;
             }
-            if (LE_OK != pa_flash_Write( flashFd, RawImagePtr[0], flashInfo.writeSize))
+            if (LE_OK != pa_flash_Write( flashFd, RawImagePtr[0], flashInfoPtr->writeSize))
             {
                 LE_ERROR("(%d)pa_flash_Write fails: %m", pass);
                 goto critical;
@@ -1205,16 +1208,16 @@ le_result_t partition_WriteDataSBL
                                               0,
                                               0,
                                               ImageSize,
-                                              (atOffset < (flashInfo.nbBlk / 2)
+                                              (sblBaseBlk < (flashInfoPtr->nbLeb / 2)
                                                ? 0
-                                               : (flashInfo.nbBlk / 2)) * flashInfo.eraseSize,
+                                               : (flashInfoPtr->nbLeb / 2)) * flashInfoPtr->eraseSize,
                                               hdrPtr->crc32,
                                               *ctxPtr->flashPoolPtr, true, false))
             {
                 LE_CRIT("SBL flash failed at block %d. Erasing...", sblBaseBlk);
-                for (atBlk = 0; atBlk < (flashInfo.nbBlk / 2); atBlk++)
+                for (atBlk = 0; atBlk < (flashInfoPtr->nbLeb / 2); atBlk++)
                 {
-                    pa_flash_EraseBlock( flashFd, atBlk + (atOffset / flashInfo.eraseSize) );
+                    pa_flash_EraseBlock( flashFd, atBlk + (atOffset / flashInfoPtr->eraseSize) );
                 }
                 goto critical;
             }
@@ -1222,12 +1225,10 @@ le_result_t partition_WriteDataSBL
             // Do low and high or high and low: 2 passes
         } while (++pass < SBL_MAX_PASS);
 
-        for (atBlk = 0; atBlk < flashInfo.nbBlk / 2; atBlk++)
+        for (atBlk = 0; atBlk < flashInfoPtr->nbLeb / 2; atBlk++)
         {
-            pa_flash_EraseBlock( flashFd, atBlk + (sblBlk ? 0 : flashInfo.nbBlk / 2) );
+            pa_flash_EraseBlock( flashFd, atBlk + (sblBlk ? 0 : flashInfoPtr->nbLeb / 2) );
         }
-
-        pa_flash_Close(flashFd);
 
         for (sblIdxBlk = 0; (sblIdxBlk < sblNbBlk) && RawImagePtr[sblIdxBlk]; sblIdxBlk++)
         {
@@ -1241,6 +1242,7 @@ le_result_t partition_WriteDataSBL
         MtdNamePtr = NULL;
     }
 
+    pa_flash_Close(flashFd);
     return res;
 
 critical:
