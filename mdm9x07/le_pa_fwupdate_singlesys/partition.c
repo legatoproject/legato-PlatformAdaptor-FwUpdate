@@ -1799,7 +1799,8 @@ le_result_t partition_OpenUbiVolumeSwifotaPartition
         PartitionPtr->ubiVolId = ubiVolId;
         PartitionPtr->ubiVolType = ubiVolType;
         PartitionPtr->ubiVolSize = ubiVolSize;
-        strncpy(PartitionPtr->ubiVolName, ubiVolName, sizeof(PartitionPtr->ubiVolName));
+        le_utf8_Copy(PartitionPtr->ubiVolName, ubiVolName,
+                     sizeof(PartitionPtr->ubiVolName), NULL);
     }
     LE_INFO("Created UBI volume \"%s\" Id %u Size %u Type %u at offset 0x%lx",
             PartitionPtr->ubiVolName, PartitionPtr->ubiVolId, PartitionPtr->ubiVolSize,

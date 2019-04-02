@@ -68,4 +68,3 @@ void utils_CopyAndIncrPtr
     *packetPtrPtr = packetPtr;
 }
 
-

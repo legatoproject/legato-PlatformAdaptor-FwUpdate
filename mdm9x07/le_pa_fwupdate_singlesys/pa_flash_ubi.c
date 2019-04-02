@@ -3115,7 +3115,8 @@ le_result_t pa_flash_CreateUbiVolumeWithFlags
         memset(&vtblPtr[ubiVolId], 0, sizeof(struct ubi_vtbl_record));
         // Copy the volume name into the record, the name length, the number of PEBs and the
         // volume type
-        strncpy((char *)vtblPtr[ubiVolId].name, ubiVolNamePtr, UBI_MAX_VOLUMES);
+        le_utf8_Copy((char *)vtblPtr[ubiVolId].name, ubiVolNamePtr,
+                     sizeof(vtblPtr[ubiVolId].name), NULL);
         vtblPtr[ubiVolId].name_len = htobe16(strlen(ubiVolNamePtr));
         vtblPtr[ubiVolId].reserved_pebs = htobe32(volPebs);
         vtblPtr[ubiVolId].alignment = htobe32(1);
