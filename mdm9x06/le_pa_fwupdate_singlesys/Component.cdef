@@ -4,6 +4,21 @@ requires:
     {
         le_fwupdate.api  [types-only]
     }
+
+    component:
+    {
+        ${LEGATO_ROOT}/components/3rdParty/zlib
+        ${LEGATO_ROOT}/components/3rdParty/openssl
+        ${LEGATO_ROOT}/components/3rdParty/libbz2
+    }
+
+    lib:
+    {
+        z
+        ssl
+        bz2
+        crypto
+    }
 }
 
 sources:
@@ -42,7 +57,5 @@ cflags:
 
 ldflags:
 {
-    -lbz2
-    -lz
-    -lssl
+    -L${LEGATO_BUILD}/3rdParty/lib
 }
