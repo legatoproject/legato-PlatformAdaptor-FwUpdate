@@ -1152,7 +1152,7 @@ le_result_t partition_CloseSwifotaPartition
     if (forceClose)
     {
         // If forceClose set, close descriptor and release all resources
-        LE_CRIT( "Closing and releasing MTD due to forceClose" );
+        LE_WARN( "Closing and releasing MTD due to forceClose" );
         goto error;
     }
 
@@ -1393,7 +1393,7 @@ le_result_t partition_WriteSwifotaPartition
     if (forceClose)
     {
         // If forceClose set, close descriptor and release all resources
-        LE_CRIT( "Closing and releasing MTD due to forceClose" );
+        LE_WARN( "Closing and releasing MTD due to forceClose" );
         goto error;
     }
 

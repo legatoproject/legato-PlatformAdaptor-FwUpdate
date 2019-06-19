@@ -955,7 +955,7 @@ le_result_t partition_WriteDataSBL
     if (forceClose)
     {
         // If forceClose set, close descriptor and release all resources
-        LE_CRIT( "Closing and releasing MTD due to forceClose" );
+        LE_WARN( "Closing and releasing MTD due to forceClose" );
         goto forceclose;
     }
 
@@ -1303,7 +1303,7 @@ le_result_t partition_WriteUpdatePartition
     if (forceClose)
     {
         // If forceClose set, close descriptor and release all resources
-        LE_CRIT( "Closing and releasing MTD due to forceClose" );
+        LE_WARN( "Closing and releasing MTD due to forceClose" );
         goto error;
     }
 
