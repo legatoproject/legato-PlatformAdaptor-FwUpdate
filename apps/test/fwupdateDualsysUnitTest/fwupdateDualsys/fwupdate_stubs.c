@@ -371,7 +371,7 @@ le_result_t pa_fwupdate_NvupDelete
 
 //--------------------------------------------------------------------------------------------------
 /**
- * Check if the the last swap has been requested by a Legato API
+ * Get the last swap reason
  *
  * @return
  *      - LE_OK            on success
@@ -380,9 +380,9 @@ le_result_t pa_fwupdate_NvupDelete
  *      - LE_FAULT         else
  */
 //--------------------------------------------------------------------------------------------------
-le_result_t pa_fwupdate_IsSwapRequestedByLegato
+le_result_t pa_fwupdate_GetSwapReason
 (
-    bool* isLegatoSwapReqPtr   ///< [OUT] Set to true if the swap is requested by a Legato API
+    uint32_t* swapReasonPtr   ///< [OUT] Pointer to return the swap reason value
 )
 {
     return LE_OK;

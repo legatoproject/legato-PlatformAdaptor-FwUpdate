@@ -36,6 +36,16 @@
 
 //--------------------------------------------------------------------------------------------------
 /**
+ * Swap reason flags
+ * SWAP_BY_LEGATO value has to be matched with DS_SWAP_REASON_APPS in ds_swap_reason_e enum defined
+ * in dsudefs.h
+ */
+//--------------------------------------------------------------------------------------------------
+#define NO_SWAP                 0x00000000
+#define SWAP_BY_LEGATO          0x00000004
+
+//--------------------------------------------------------------------------------------------------
+/**
  * File hosting the last download status
  */
 //--------------------------------------------------------------------------------------------------
@@ -3430,19 +3440,24 @@ COMPONENT_INIT
        ((PA_FWUPDATE_INTERNAL_STATUS_SWAP_ONGOING == internalStatus) ||
         (PA_FWUPDATE_INTERNAL_STATUS_SWAP_MG_ONGOING == internalStatus)))
     {
-        bool isLegatoSwapReq = false;
-        result = pa_fwupdate_IsSwapRequestedByLegato(&isLegatoSwapReq);
+        uint32_t swapReason = 0;
+        result = pa_fwupdate_GetSwapReason(&swapReason);
         if (LE_OK == result)
         {
-            if (isLegatoSwapReq)
+            switch(swapReason)
             {
-                LE_INFO("Package installed successfuly");
-                RECORD_DWL_STATUS(PA_FWUPDATE_INTERNAL_STATUS_OK);
-            }
-            else
-            {
-                LE_ERROR("An unexpected reboot occured during last installation. Redo the install");
-                pa_fwupdate_Install(PA_FWUPDATE_INTERNAL_STATUS_SWAP_MG_ONGOING == internalStatus);
+                case NO_SWAP:
+                    LE_ERROR("No swap since last installation. Redo the install");
+                    pa_fwupdate_Install(PA_FWUPDATE_INTERNAL_STATUS_SWAP_MG_ONGOING == internalStatus);
+                    break;
+                case SWAP_BY_LEGATO:
+                    LE_INFO("Package installed successfuly");
+                    RECORD_DWL_STATUS(PA_FWUPDATE_INTERNAL_STATUS_OK);
+                    break;
+                default:
+                    LE_ERROR("Unknown install status");
+                    RECORD_DWL_STATUS(PA_FWUPDATE_INTERNAL_STATUS_UNKNOWN);
+                    break;
             }
         }
     }
