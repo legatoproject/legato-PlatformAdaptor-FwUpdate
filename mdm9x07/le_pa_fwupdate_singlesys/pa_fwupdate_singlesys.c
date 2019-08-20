@@ -148,11 +148,11 @@ typedef struct
     Metadata_t metaData;            ///< Meta data of the current package
 
     bool       ubiVolumeCreated;    ///< True if the UBI volume has been created
-    size_t     partitioncCtxSize;   ///< Partition context size
+    size_t     partitionCtxSize;    ///< Partition context size
     off_t      partitionOffset;     ///< Partition offset
     uint8_t    padding[2];          ///< This padding is to make sure that the crc32 is computed
                                     ///< correctly
-
+    uint32_t partitionCtxCrc;       ///< CRC for partition resume data.
     uint32_t ctxCrc;                ///< Context CRC, Computed on all previous fields of this struct
 }
 ResumeCtxSave_t;
@@ -308,6 +308,10 @@ static le_result_t UpdateResumeCtx
             // Swap the fileIndex
             resumeCtxPtr->fileIndex ^= 1UL;
             resumeCtxPtr->saveCtx.ctxCounter++;
+            resumeCtxPtr->saveCtx.partitionCtxCrc = le_crc_Crc32(PartitionContextPtr,
+                                                           resumeCtxPtr->saveCtx.partitionCtxSize,
+                                                           LE_CRC_START_CRC32);
+
             resumeCtxPtr->saveCtx.ctxCrc = le_crc_Crc32((uint8_t*)&resumeCtxPtr->saveCtx,
                                                         sizeof(resumeCtxPtr->saveCtx) -
                                                         sizeof(resumeCtxPtr->saveCtx.ctxCrc),
@@ -316,19 +320,23 @@ static le_result_t UpdateResumeCtx
             LE_DEBUG("resumeCtx: ctxCounter %d, imageType %d, imageSize %d, imageCrc 0x%x,",
                      resumeCtxPtr->saveCtx.ctxCounter, resumeCtxPtr->saveCtx.imageType,
                      resumeCtxPtr->saveCtx.imageSize, resumeCtxPtr->saveCtx.imageCrc);
-            LE_DEBUG("            currentImageCrc 0x%x totalRead %zu currentInImageOffset 0x%x,",
+            LE_DEBUG("            currentImageCrc 0x%x totalRead %" PRIuS
+                     "currentInImageOffset 0x%x",
                      resumeCtxPtr->saveCtx.currentImageCrc, resumeCtxPtr->saveCtx.totalRead,
                      resumeCtxPtr->saveCtx.currentInImageOffset);
-            LE_DEBUG("            fullImageLength %zd ctxCrc 0x%08" PRIx32,
-                     resumeCtxPtr->saveCtx.fullImageLength, resumeCtxPtr->saveCtx.ctxCrc);
+            LE_DEBUG("            fullImageLength %" PRIdS "ctxCrc 0x%08" PRIx32
+                     " partitionCtxCrc 0x%08" PRIx32,
+                     resumeCtxPtr->saveCtx.fullImageLength, resumeCtxPtr->saveCtx.ctxCrc,
+                     resumeCtxPtr->saveCtx.partitionCtxCrc);
 
             // Write the resume context
             result = le_fs_Write(fd, (uint8_t*)&resumeCtxPtr->saveCtx,
-                                 sizeof(resumeCtxPtr->saveCtx));
+                                             sizeof(resumeCtxPtr->saveCtx));
 
             // Write the partition context
             result |= le_fs_Write(fd, PartitionContextPtr,
-                                  resumeCtxPtr->saveCtx.partitioncCtxSize);
+                                  resumeCtxPtr->saveCtx.partitionCtxSize);
+
             if (result != LE_OK)
             {
                 LE_ERROR("Error while writing %s", str);
@@ -473,6 +481,7 @@ static le_result_t GetResumeCtx
         if (LE_OK == result)
         {
             uint32_t crc32;
+            uint32_t partitionCtxCrc32;
             uint32_t idx;
             int i;
 
@@ -486,10 +495,33 @@ static le_result_t GetResumeCtx
                 crc32 = le_crc_Crc32((uint8_t*)currentCtxSave,
                                      sizeof(*currentCtxSave) - sizeof(currentCtxSave->ctxCrc),
                                      LE_CRC_START_CRC32);
-                if (crc32 != currentCtxSave->ctxCrc)
+                size_t readSize = currentCtxSave->partitionCtxSize;
+
+                memset(PartitionContextPtr, 0, readSize);
+
+                result = le_fs_Read(fd[idx], PartitionContextPtr, &readSize);
+
+                if ((result != LE_OK) || (readSize != currentCtxSave->partitionCtxSize))
                 {
-                    LE_ERROR("File #%d Bad CRC32: expected 0x%x, get 0x%x",
-                             idx, currentCtxSave->ctxCrc, crc32);
+                    LE_ERROR("Unable to read partition context, read: %" PRIuS", expected: %" PRIuS,
+                             readSize, currentCtxSave->partitionCtxSize);
+                    // Swap the index
+                   idx ^= 1UL;
+                   result = LE_FAULT;
+                   continue;
+                }
+
+                partitionCtxCrc32 = le_crc_Crc32(PartitionContextPtr,
+                                                 currentCtxSave->partitionCtxSize,
+                                                 LE_CRC_START_CRC32);
+
+                if ((crc32 != currentCtxSave->ctxCrc) ||
+                        (partitionCtxCrc32 != currentCtxSave->partitionCtxCrc))
+                {
+                    LE_ERROR("File #%d Bad CRC32: expected (resumeCtx) 0x%x, get 0x%x"
+                             " expected (partitionCtx) 0x%x, get 0x%x",
+                             idx, currentCtxSave->ctxCrc, crc32,
+                             currentCtxSave->partitionCtxCrc, partitionCtxCrc32);
                     // Swap the index
                     idx ^= 1UL;
                     result = LE_FAULT;
@@ -508,24 +540,18 @@ static le_result_t GetResumeCtx
 
                 memcpy(&resumeCtxPtr->saveCtx, currentCtxSave, sizeof(resumeCtxPtr->saveCtx));
 
-                size_t readSize = resumeCtxPtr->saveCtx.partitioncCtxSize;
-
-                result = le_fs_Read(fd[idx], PartitionContextPtr, &readSize);
-                if ((result != LE_OK) || (readSize != resumeCtxPtr->saveCtx.partitioncCtxSize))
-                {
-                    LE_ERROR("Unable to read partition context");
-                }
-
                 LE_DEBUG("resumeCtx: ctxCounter %d, imageType %d, imageSize %d, imageCrc 0x%x,",
                          resumeCtxPtr->saveCtx.ctxCounter, resumeCtxPtr->saveCtx.imageType,
                          resumeCtxPtr->saveCtx.imageSize, resumeCtxPtr->saveCtx.imageCrc);
-                LE_DEBUG("           currentImageCrc 0x%08" PRIx32 "totalRead %zu "
-                         "currentInImageOffset 0x%08" PRIx32,
+                LE_DEBUG("           currentImageCrc 0x%08" PRIx32 "totalRead %" PRIuS
+                         " currentInImageOffset 0x%08" PRIx32,
                          resumeCtxPtr->saveCtx.currentImageCrc,resumeCtxPtr->saveCtx.totalRead,
                          resumeCtxPtr->saveCtx.currentInImageOffset);
-                LE_DEBUG("           fullImageLength %zd ctxCrc 0x%08" PRIx32,
+                LE_DEBUG("           fullImageLength %" PRIdS " ctxCrc 0x%x contentSize: %" PRIuS
+                         ", paritionCtxCrc: 0x%x",
                          resumeCtxPtr->saveCtx.fullImageLength,
-                         resumeCtxPtr->saveCtx.ctxCrc);
+                         resumeCtxPtr->saveCtx.ctxCrc, resumeCtxPtr->saveCtx.partitionCtxSize,
+                         resumeCtxPtr->saveCtx.partitionCtxCrc);
             }
             else
             {
@@ -585,7 +611,7 @@ static le_result_t WriteData
 
     if (!forceClose)
     {
-        LE_DEBUG("Type %"PRIu32" len %zu", hdrPtr->imageType, *lengthPtr);
+        LE_DEBUG("Type %"PRIu32" len %" PRIuS, hdrPtr->imageType, *lengthPtr);
     }
 
     // Delta patch
@@ -625,7 +651,7 @@ static le_result_t WriteData
 
     if( !forceClose )
     {
-        LE_INFO("Type %"PRIu32" len %zu  wr %zu",
+        LE_INFO("Type %"PRIu32" len %" PRIuS " wr %" PRIuS,
                 hdrPtr->imageType, lengthPtr ? *lengthPtr : 0, *wrLenPtr);
     }
     return ret;
@@ -743,7 +769,7 @@ static ssize_t LengthToRead
             }
         }
     }
-    LE_DEBUG("readCount=%zd", readCount);
+    LE_DEBUG("readCount=%" PRIdS, readCount);
     return readCount;
 }
 
@@ -774,8 +800,8 @@ static void StoreCurrentPosition
     saveCtxPtr->currentGlobalCrc = CurrentGlobalCrc32;
     saveCtxPtr->miscOpts = CurrentCweHeader.miscOpts;
 
-    partition_GetPartitionInternals(&contextPtr, &(saveCtxPtr->partitioncCtxSize));
-    memcpy(PartitionContextPtr, contextPtr, saveCtxPtr->partitioncCtxSize);
+    partition_GetPartitionInternals(&contextPtr, &(saveCtxPtr->partitionCtxSize));
+    memcpy(PartitionContextPtr, contextPtr, saveCtxPtr->partitionCtxSize);
     partition_GetSwifotaOffsetPartition(&(saveCtxPtr->partitionOffset));
 
     if (UpdateResumeCtx(resumeCtxPtr) != LE_OK)
@@ -854,7 +880,7 @@ static le_result_t ProcessMetaImgData
           return LE_FAULT;
         }
 
-        LE_DEBUG ("CurrentInImageOffset %zu, CurrentImage %d",
+        LE_DEBUG ("CurrentInImageOffset %" PRIuS ", CurrentImage %d",
                 CurrentInImageOffset, CurrentCweHeader.imageType);
         resumeCtxPtr->saveCtx.isImageToBeRead = false;
     }
@@ -891,7 +917,7 @@ static size_t WriteCweHeader
     // Check incoming parameters
     if (length > CWE_HEADER_SIZE)
     {
-        LE_ERROR("Length: %zu higher than allowed: %d", length, (int)CWE_HEADER_SIZE);
+        LE_ERROR("Length: %" PRIuS "higher than allowed: %d", length, (int)CWE_HEADER_SIZE);
         return 0;
     }
 
@@ -1014,7 +1040,7 @@ static le_result_t WriteImageData
                                wrLenPtr,
                                false))
         {
-            LE_INFO("chunk length: %zd", length);
+            LE_INFO("chunk length: %" PRIuS, length);
 
             CurrentGlobalCrc32 = le_crc_Crc32((uint8_t*)chunkPtr + writtenLength,
                                               tmpLength,
@@ -1041,7 +1067,7 @@ static le_result_t WriteImageData
 
                 StoreCurrentPosition(resumeCtxPtr);
             }
-            LE_INFO("CurrentInImgOffset: %zu CurrentImageSize: %"PRIu32 " wrLen: %zu",
+            LE_INFO("CurrentInImgOffset: %" PRIuS "CurrentImageSize: %"PRIu32 " wrLen: %" PRIuS,
                     CurrentInImageOffset, CurrentCweHeader.imageSize,  *wrLenPtr);
         }
         else
@@ -1108,7 +1134,7 @@ static le_result_t WriteImageData
         }
         // Erase the path flag in options to allow new cwe header to be read
         cweHeaderPtr->miscOpts &= (uint8_t)~((uint8_t)CWE_MISC_OPTS_DELTAPATCH);
-        LE_DEBUG ("CurrentInImageOffset %zu, CurrentImage %d",
+        LE_DEBUG ("CurrentInImageOffset %" PRIuS ", CurrentImage %d",
                   CurrentInImageOffset, cweHeaderPtr->imageType);
         resumeCtxPtr->saveCtx.isImageToBeRead = false;
         StoreCurrentPosition(resumeCtxPtr);
@@ -1161,7 +1187,7 @@ static le_result_t ParseCweHeader
             saveCtxPtr->globalCrc = CurrentCweHeader.crc32;
             saveCtxPtr->currentGlobalCrc = LE_CRC_START_CRC32;
             PartitionCtx.fullImageSize = saveCtxPtr->fullImageLength;
-            LE_INFO("TOP CWE header: fullImageLength = %zd, CRC=0x%08" PRIx32,
+            LE_INFO("TOP CWE header: fullImageLength = %" PRIdS ", CRC=0x%08" PRIx32,
                     saveCtxPtr->fullImageLength, saveCtxPtr->globalCrc);
 
             // First CWE header. Copy it in MetaData structure
@@ -1391,7 +1417,7 @@ static le_result_t ParseImgdiffPatchHeaders
                      LE_ERROR("Failed to apply imgdiff copy command");
                      return LE_FAULT;
                  }
-                 LE_INFO("Imgdiff copy command. Data written in flash: %zd", writeLen);
+                 LE_INFO("Imgdiff copy command. Data written in flash: %" PRIuS, writeLen);
              }
              else
              {
@@ -1431,7 +1457,7 @@ static le_result_t ParseAndStoreData
     ResumeCtxSave_t *saveCtxPtr = &(resumeCtxPtr->saveCtx);
     size_t tmpLen;
 
-    LE_DEBUG("Parsing a chunkPtr: len %zd, isImageToBeRead %d",
+    LE_DEBUG("Parsing a chunkPtr: len %" PRIuS ", isImageToBeRead %d",
               length, resumeCtxPtr->saveCtx.isImageToBeRead);
 
     // Check if a header is read or a component image
@@ -1581,7 +1607,7 @@ static le_result_t ParseAndStoreData
                 saveCtxPtr->globalCrc = cweHdr.crc32;
                 saveCtxPtr->fullImageLength = cweHdr.imageSize + CWE_HEADER_SIZE;
                 PartitionCtx.fullImageSize = saveCtxPtr->fullImageLength;
-                LE_INFO("META CWE header: fullImageLength = %zd, CRC=0x%08" PRIx32,
+                LE_INFO("META CWE header: fullImageLength = %" PRIdS ", CRC=0x%08" PRIx32,
                         saveCtxPtr->fullImageLength, saveCtxPtr->globalCrc);
             }
             // Now write only the first cweHeader and store others
@@ -1788,7 +1814,7 @@ static le_result_t EpollinRead
                         else if (evts & EPOLLIN)
                         {
                             *lengthPtr = read (fd, bufferPtr, *lengthPtr);
-                            LE_DEBUG("Read %zd bytes", *lengthPtr);
+                            LE_DEBUG("Read %" PRIdS "bytes", *lengthPtr);
                             if (0 == *lengthPtr)
                             {
                                 return LE_CLOSED;
@@ -2028,7 +2054,7 @@ static le_result_t BuildMetaData
                                        sizeof(Metadata_t) - sizeof(metaDataPtr->crc32),
                                        LE_CRC_START_CRC32);
 
-    LE_INFO("Image length: %zd", PartitionCtx.fullImageSize);
+    LE_INFO("Image length: %" PRIdS, PartitionCtx.fullImageSize);
     LE_INFO("Logical block: %x, Physical block: %x",
             metaDataPtr->logicalBlock, metaDataPtr->phyBlock);
 
@@ -2231,7 +2257,7 @@ le_result_t pa_fwupdate_Download
                 LE_DEBUG("Update totalCount %d", (uint32_t)totalCount);
                 if (totalCount >= saveCtxPtr->inImageLength)
                 {
-                    LE_INFO("End of update: total read %zd, full length expected %zd",
+                    LE_INFO("End of update: total read %" PRIuS ", full length expected %" PRIdS,
                             totalCount, saveCtxPtr->inImageLength);
                     readCount = 0;
                     StoreCurrentPosition(&ResumeCtx);
@@ -2250,7 +2276,7 @@ le_result_t pa_fwupdate_Download
 
         if (!readCount)
         {
-            LE_DEBUG ("Read %zd bytes in total", totalCount);
+            LE_DEBUG ("Read %" PRIuS "bytes in total", totalCount);
             if (totalCount > saveCtxPtr->inImageLength)
             {
                 LE_ERROR("Too much data have been received");
@@ -2595,7 +2621,7 @@ COMPONENT_INIT
 
     // Allocate a pool for the partition context
     partition_GetPartitionInternals(&partitionCtxPtr, &partitionCtxSize);
-    PartitionContextPool = le_mem_CreatePool("PartitionPool", partitionCtxSize);
+    PartitionContextPool = le_mem_CreatePool("PartitionCtxPool", partitionCtxSize);
     le_mem_ExpandPool(PartitionContextPool, 1);
     PartitionContextPtr = le_mem_AssertAlloc(PartitionContextPool);
 
