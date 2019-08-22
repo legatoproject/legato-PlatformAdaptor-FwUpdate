@@ -25,6 +25,13 @@
 //--------------------------------------------------------------------------------------------------
 #define TMP_PATCH_PATH "/tmp/.tmp.patch"
 
+//--------------------------------------------------------------------------------------------------
+/**
+ * UBI volumes name format path into /sys
+ */
+//--------------------------------------------------------------------------------------------------
+#define SYS_UBI_VOLUME_NAME_PATH      "/sys/class/ubi/ubi%d_%d/name"
+
 //==================================================================================================
 //                                       Private Functions
 //==================================================================================================
@@ -118,6 +125,74 @@ error:
 
 //--------------------------------------------------------------------------------------------------
 /**
+ * Get UBI volume name that stores DM-verity hash data
+ *
+ * @return
+ *      - LE_OK        on success
+ *      - LE_FAULT     on failure
+ */
+//--------------------------------------------------------------------------------------------------
+static le_result_t GetVerityVolumeName
+(
+    int mtdNum,                     ///< [IN] MTD number of the partition
+    uint32_t ubiVolId,              ///< [IN]  UBI volume id, Should be either 1 or 2
+    char* volName                   ///< [OUT] UBI volume name. Caller must ensure that it's size
+                                    ///<       greater or equal PA_FLASH_MAX_INFO_NAME;
+)
+{
+    int ubiId;
+    int nbUbiVol;
+
+    if (LE_OK != partition_CheckIfUbiAndGetUbiVolumes( mtdNum, &ubiId, &nbUbiVol))
+    {
+        LE_ERROR("Failed to get ubi volume id for mtd%d", mtdNum);
+        return LE_FAULT;
+    }
+
+    if ((1 != ubiVolId) && (2 != ubiVolId))
+    {
+        LE_ERROR("Not a dm-verity hash volume. Expected volume ID: 1 or 2, Actual: %u", ubiVolId);
+        return LE_FAULT;
+    }
+
+    char ubiPathStr[PATH_MAX] = "";
+    char vol0Name[PA_FLASH_MAX_INFO_NAME] = "";
+    FILE* ubiNameFilePtr = NULL;
+    le_result_t result = LE_FAULT;
+
+    snprintf(ubiPathStr, sizeof(ubiPathStr), SYS_UBI_VOLUME_NAME_PATH, ubiId, 0);
+    ubiNameFilePtr = fopen(ubiPathStr, "r");
+
+    if (ubiNameFilePtr)
+    {
+
+        if (fgets(vol0Name, sizeof(vol0Name), ubiNameFilePtr))
+        {
+            char *pos = NULL;
+            if ((pos=strchr(vol0Name, '\n')) != NULL)
+            {
+                *pos = '\0';   //fgets may return escape character, hence trim it.
+            }
+
+            snprintf(volName, sizeof(vol0Name), "%s%s", vol0Name, (ubiVolId == 1)? "_hs": "_rhs");
+            result = LE_OK;
+        }
+        else
+        {
+            LE_ERROR("fgets() failed. %m");
+        }
+        fclose(ubiNameFilePtr);
+    }
+    else
+    {
+        LE_ERROR("Failed to open file '%s'. %m", ubiPathStr);
+    }
+
+    return result;
+}
+
+//--------------------------------------------------------------------------------------------------
+/**
  * Open a UBI volume in target partition.
  *
  * @return
@@ -127,6 +202,7 @@ error:
 //--------------------------------------------------------------------------------------------------
 static le_result_t OpenUbiVolume
 (
+    int mtdNum,
     partition_Ctx_t* partCtxPtr,
     deltaUpdate_Ctx_t* ctxPtr,
     pa_flash_Desc_t desc
@@ -138,16 +214,32 @@ static le_result_t OpenUbiVolume
     bool createVolumeReq = *(ctxPtr->ubiVolumeCreatedPtr) ? false : true;
 
 
-    char volName[PA_FLASH_UBI_MAX_VOLUMES]= "";
+    char volName[PA_FLASH_MAX_INFO_NAME]= "";
     LE_INFO("createVolumeReq: %d, desc: %p", createVolumeReq, desc);
     // Get ubi volume and type
     le_result_t result = pa_flash_GetUbiTypeAndName(desc, &volType, volName, &volFlags);
 
+    // pa_flash api may fail for two reason.
+    //     First: its a new volume that is non-existent previously (example: dm-verity hash volume)
+    //     Second: error.
+    // For dm-verity hash volumes, ubi attributes can be derived, hence, try to derive it. Throw
+    // error for other volumes.
     if (LE_OK != result)
     {
-        LE_ERROR("Failed to get ubi volume type and name. desc: %p, result: %d, volName: %s",
-                 desc, (int)(result), volName);
-        return LE_FAULT;
+        // It's a dm-verity hash volume, hence it's not an error.
+        if ((1 == metaHdrPtr->ubiVolId) || (2 == metaHdrPtr->ubiVolId))
+        {
+            volType = PA_FLASH_VOLUME_STATIC;
+            volFlags = 0;
+            result = GetVerityVolumeName(mtdNum, metaHdrPtr->ubiVolId, volName);
+        }
+
+        if (LE_OK != result)    // Failed to get volume name, consider it an error.
+        {
+            LE_ERROR("Failed to get ubi volume type/name. desc: %p, result: %d, volName: %s",
+                     desc, (int)(result), volName);
+            return LE_FAULT;
+        }
     }
     if (metaHdrPtr->ubiVolType != (uint8_t)-1)
     {
@@ -267,7 +359,7 @@ static le_result_t  ApplyUbiPatch
     if (0 == memcmp(ctxPtr->metaHdrPtr->diffType, NODIFF_MAGIC, strlen(NODIFF_MAGIC)))
     {
         // Must have opened a ubi volume before, no need to create ubi
-        if (LE_OK != OpenUbiVolume(partCtxPtr, ctxPtr, desc))
+        if (LE_OK != OpenUbiVolume(mtdOrigNum, partCtxPtr, ctxPtr, desc))
         {
             LE_ERROR("Failed to create ubi volume inside swifota");
             return LE_FAULT;
@@ -312,7 +404,7 @@ static le_result_t  ApplyUbiPatch
                 return LE_FAULT;
             }
 
-            if (LE_OK != OpenUbiVolume(partCtxPtr, ctxPtr, desc))
+            if (LE_OK != OpenUbiVolume(mtdOrigNum, partCtxPtr, ctxPtr, desc))
             {
                 LE_ERROR("Failed to create ubi volume inside swifota");
                 return LE_FAULT;
@@ -633,13 +725,25 @@ le_result_t deltaUpdate_ApplyUbiImgPatch
             goto ubierror;
         }
 
-        res = pa_flash_ScanUbi(desc, patchMetaHdrPtr->ubiVolId);
-        if (LE_OK != res)
+        int ubiId, nbUbiVol;
+
+        if (LE_OK != partition_CheckIfUbiAndGetUbiVolumes( MtdOrigNum, &ubiId, &nbUbiVol))
         {
-            LE_ERROR("Scan of MTD %d UBI volId %u fails: %d",
-                     MtdOrigNum, patchMetaHdrPtr->ubiVolId, res );
+            LE_ERROR("Failed to get ubi volume id and number of volumes for mtd%d", MtdOrigNum);
             goto ubierror;
         }
+
+        if (patchMetaHdrPtr->ubiVolId < nbUbiVol)
+        {
+            res = pa_flash_ScanUbi(desc, patchMetaHdrPtr->ubiVolId);
+            if (LE_OK != res)
+            {
+                LE_ERROR("Scan of MTD %d UBI volId %u fails: %d",
+                         MtdOrigNum, patchMetaHdrPtr->ubiVolId, res );
+                goto ubierror;
+            }
+        }
+
         LE_INFO("desc: %p, ubivol: %u", desc, patchMetaHdrPtr->ubiVolId);
         InPatch = true;
     }

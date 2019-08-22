@@ -198,6 +198,12 @@ le_result_t imgpatch_ApplyImgPatch
         size_t srcStart = imgpatchMeta.normMeta.src_start;
         size_t srcLen = imgpatchMeta.normMeta.src_len;
 
+        if (srcLen > MAX_CHUNK_LEN)
+        {
+            LE_ERROR("Too large source chunk. Max allowed: %d, Length: %zu", MAX_CHUNK_LEN, srcLen);
+            return LE_FAULT;
+        }
+
         memset(ChunkBuffer, 0, sizeof(ChunkBuffer));
         if ( LE_OK != ReadChunk(srcDesc, srcStart, srcLen, ChunkBuffer))
         {
