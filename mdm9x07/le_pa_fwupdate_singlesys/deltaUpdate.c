@@ -165,22 +165,35 @@ static le_result_t GetVerityVolumeName
 
     if (ubiNameFilePtr)
     {
-
         if (fgets(vol0Name, sizeof(vol0Name), ubiNameFilePtr))
         {
             char *pos = NULL;
             if ((pos=strchr(vol0Name, '\n')) != NULL)
             {
-                *pos = '\0';   //fgets may return escape character, hence trim it.
+                *pos = '\0';   // fgets may return escape character, hence trim it.
             }
 
-            snprintf(volName, sizeof(vol0Name), "%s%s", vol0Name, (ubiVolId == 1)? "_hs": "_rhs");
-            result = LE_OK;
+            if (snprintf(volName,
+                         sizeof(vol0Name),
+                         "%s%s",
+                         vol0Name,
+                         (ubiVolId == 1)? "_hs": "_rhs") >= sizeof(vol0Name))
+            {
+                LE_ERROR("Buffer for vol0Name too small: vol0Name[%s][%"PRIuS"] ubiVolId[%d]",
+                         vol0Name,
+                         sizeof(vol0Name),
+                         ubiVolId);
+            }
+            else
+            {
+                result = LE_OK;
+            }
         }
         else
         {
             LE_ERROR("fgets() failed. %m");
         }
+
         fclose(ubiNameFilePtr);
     }
     else
