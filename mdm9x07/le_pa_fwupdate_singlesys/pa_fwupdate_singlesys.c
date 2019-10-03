@@ -2333,7 +2333,6 @@ le_result_t pa_fwupdate_Download
                 goto error;
             }
 
-            updateStatus = PA_FWUPDATE_INTERNAL_STATUS_OK;
             result = LE_OK;
 
             EraseResumeCtx(&ResumeCtx);
@@ -2466,9 +2465,8 @@ le_result_t pa_fwupdate_Install
     bool isMarkGoodReq      ///< [IN] Indicate if a mark good operation is required after install
 )
 {
-    RECORD_DWL_STATUS(PA_FWUPDATE_INTERNAL_STATUS_INST_ONGOING);
 
-    // Write the Meta data paritition
+    // Write the Meta data in swifota partition
     if (LE_OK != WriteMetaData(&ResumeCtx))
     {
         return LE_FAULT;
@@ -2476,6 +2474,11 @@ le_result_t pa_fwupdate_Install
 
     // Clean the resume context as it contains a valid meta data structure
     EraseResumeCtx(&ResumeCtx);
+
+    // Change the status after writing the metadata. Otherwise if power-cut happens after changing
+    // status but before writing metadata, SBL won't do any firmware installation although fwupdate
+    // changed the status to INSTALL ONGOING
+    RECORD_DWL_STATUS(PA_FWUPDATE_INTERNAL_STATUS_INST_ONGOING);
 
     pa_fwupdate_Reset();
 
