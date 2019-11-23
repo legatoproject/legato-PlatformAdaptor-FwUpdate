@@ -78,3 +78,4 @@ LE_SHARED le_result_t pa_fwupdate_GetInternalUpdateStatus
 );
 
 #endif /* LEGATO_PASWUPDATESINGLESYS_INCLUDE_GUARD */
+
