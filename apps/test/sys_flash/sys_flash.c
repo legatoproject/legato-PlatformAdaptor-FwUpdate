@@ -804,6 +804,7 @@ int sys_flashIoctl
 
     va_start (ap, request);
     arg = va_arg (ap, void *);
+    va_end(ap);
 
     switch(request)
     {

@@ -160,7 +160,7 @@ COMPONENT_INIT
         fclose(ubiFd);
         snprintf(ubiPath, sizeof(ubiPath), SYS_CLASS_UBI_PATH "/ubi%d_0/name", iUbi);
         LE_ASSERT(NULL != (ubiFd = fopen(ubiPath, "r")));
-        fscanf(ubiFd, "%s", ubiVolName);
+        fgets(ubiVolName, (PA_FLASH_UBI_MAX_VOLUMES - 1), ubiFd);
         fclose(ubiFd);
         LE_ASSERT_OK(pa_flash_Open(mtdNum, PA_FLASH_OPENMODE_READWRITE, &desc, &mtdInfoPtr));
         LE_ASSERT_OK(pa_flash_CreateUbi(desc, true));
