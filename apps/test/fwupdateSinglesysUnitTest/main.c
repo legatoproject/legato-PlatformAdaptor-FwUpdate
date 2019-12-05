@@ -416,7 +416,10 @@ COMPONENT_INIT
     char *bbPtr = getenv("BAD_BLOCK_SWIFOTA");
     if( bbPtr && *bbPtr )
     {
-        sscanf( bbPtr, "%llx", &bbMask );
+        if ((sscanf( bbPtr, "%llx", &bbMask )) != 1)
+        {
+            LE_TEST_INFO("Error reading bad block mask from %s", bbPtr);
+        }
         LE_TEST_INFO("Bad block string \"%s\", mask %llx", bbPtr, bbMask);
         sys_flash_SetBadBlockErase( "swifota", bbMask );
     }

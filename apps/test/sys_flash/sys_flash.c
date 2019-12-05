@@ -437,31 +437,36 @@ static void sys_flashInitPartition
     // Creates entries erasesize writesize size and name used by pa_flash
     snprintf(mtdPath, sizeof(mtdPath),
              SYS_FLASH_PREFIX SYS_CLASS_MTD_PATH "/mtd%d/erasesize", mtdNum);
-    LE_ASSERT((NULL != (flashFdPtr = fopen(mtdPath, "w"))));
+    flashFdPtr = fopen(mtdPath, "w");
+    LE_ASSERT(NULL != flashFdPtr);
     LE_ASSERT(0 < fprintf(flashFdPtr, "%u\n", SYS_FLASH_ERASESIZE ));
     LE_ASSERT(0 == fclose(flashFdPtr));
 
     snprintf(mtdPath, sizeof(mtdPath),
              SYS_FLASH_PREFIX SYS_CLASS_MTD_PATH "/mtd%d/size", mtdNum);
-    LE_ASSERT((NULL != (flashFdPtr = fopen(mtdPath, "w"))));
+    flashFdPtr = fopen(mtdPath, "w");
+    LE_ASSERT(NULL != flashFdPtr);
     LE_ASSERT(0 < fprintf(flashFdPtr, "%u\n", SysFlashMtd[mtdNum].nbPeb * SYS_FLASH_ERASESIZE));
     LE_ASSERT(0 == fclose(flashFdPtr));
 
     snprintf(mtdPath, sizeof(mtdPath),
              SYS_FLASH_PREFIX SYS_CLASS_MTD_PATH "/mtd%d/writesize", mtdNum);
-    LE_ASSERT((NULL != (flashFdPtr = fopen(mtdPath, "w"))));
+    flashFdPtr = fopen(mtdPath, "w");
+    LE_ASSERT(NULL != flashFdPtr);
     LE_ASSERT(0 < fprintf(flashFdPtr, "%u\n", SYS_FLASH_WRITESIZE ));
     LE_ASSERT(0 == fclose(flashFdPtr));
 
     snprintf(mtdPath, sizeof(mtdPath),
              SYS_FLASH_PREFIX SYS_CLASS_MTD_PATH "/mtd%d/name", mtdNum);
-    LE_ASSERT((NULL != (flashFdPtr = fopen(mtdPath, "w"))));
+    flashFdPtr = fopen(mtdPath, "w");
+    LE_ASSERT(NULL != flashFdPtr);
     LE_ASSERT(0 < fprintf(flashFdPtr, "%s\n", SysFlashMtd[mtdNum].name));
     LE_ASSERT(0 == fclose(flashFdPtr));
 
     // Create the /dev/mtdN and fill this file with all PEB to 0xFF
     snprintf(mtdPath, sizeof(mtdPath), SYS_FLASH_PREFIX DEV_MTD_PATH "%d", mtdNum);
-    LE_ASSERT((NULL != (flashFdPtr = fopen(mtdPath, "w"))));
+    flashFdPtr = fopen(mtdPath, "w");
+    LE_ASSERT(NULL != flashFdPtr);
 
     for (iPeb = 0; iPeb < SysFlashMtd[mtdNum].nbPeb; iPeb++)
     {
@@ -483,7 +488,8 @@ static void sys_flashInitPartition
         // Create entries mtd_num and volumes_count
         snprintf(ubiPath, sizeof(ubiPath),
                  SYS_FLASH_PREFIX SYS_CLASS_UBI_PATH "/ubi%d/mtd_num", SysFlashMtd[mtdNum].ubi);
-        LE_ASSERT((NULL != (flashFdPtr = fopen(ubiPath, "w"))));
+        flashFdPtr = fopen(ubiPath, "w");
+        LE_ASSERT(NULL != flashFdPtr);
         LE_ASSERT(0 < fprintf(flashFdPtr, "%d\n", mtdNum));
         LE_ASSERT(0 == fclose(flashFdPtr));
 
@@ -503,7 +509,8 @@ static void sys_flashInitPartition
             snprintf(ubiPath, sizeof(ubiPath),
                      SYS_FLASH_PREFIX SYS_CLASS_UBI_PATH "/ubi%d_%d/name",
                      SysFlashMtd[mtdNum].ubi, iVol);
-            LE_ASSERT((NULL != (flashFdPtr = fopen(ubiPath, "w"))));
+            flashFdPtr = fopen(ubiPath, "w");
+            LE_ASSERT(NULL != flashFdPtr);
             LE_ASSERT(0 < fprintf(flashFdPtr, "%s\n", SysFlashMtd[mtdNum].ubiVolNames[iVol]));
             LE_ASSERT(0 == fclose(flashFdPtr));
         }
@@ -512,7 +519,8 @@ static void sys_flashInitPartition
         snprintf(ubiPath, sizeof(ubiPath),
                  SYS_FLASH_PREFIX SYS_CLASS_UBI_PATH "/ubi%d/volumes_count",
                  SysFlashMtd[mtdNum].ubi);
-        LE_ASSERT((NULL != (flashFdPtr = fopen(ubiPath, "w"))));
+        flashFdPtr = fopen(ubiPath, "w");
+        LE_ASSERT(NULL != flashFdPtr);
         LE_ASSERT(0 < fprintf(flashFdPtr, "%d\n", iVol));
         LE_ASSERT(0 == fclose(flashFdPtr));
     }
