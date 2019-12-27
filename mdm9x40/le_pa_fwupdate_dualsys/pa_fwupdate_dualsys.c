@@ -2626,7 +2626,7 @@ static le_result_t CustSecCheck
     //delete the CUSG file
     if (unlink(filePathPtr) == -1)
     {
-        LE_ERROR("Could not unlink CUSG file. Reason, %s (%d).", strerror(errno), errno);
+        LE_ERROR("Could not unlink CUSG file. Reason, %s (%d).", LE_ERRNO_TXT(errno), errno);
     }
 
     if(-1 == cusStatus)
