@@ -2111,13 +2111,13 @@ void pa_fwupdate_Reset
 {
     sync();
     sync();
-    sleep(1);
+    le_thread_Sleep(1);
     if (-1 != system("/sbin/reboot"))
     {
         // System reset is not done immediately so we need to keep here
         while(1)
         {
-            sleep(2);
+            le_thread_Sleep(2);
             LE_DEBUG("Waiting for reboot");
         }
     }
