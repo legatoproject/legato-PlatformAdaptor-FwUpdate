@@ -1442,7 +1442,7 @@ static le_result_t ParseImgdiffPatchHeaders
  *
  * @return
  *      - LE_OK            The request was accepted
- *      - LE_UNAVAILABLE   The action is not compliant with the SW update state (no downloaded pkg)
+ *      - LE_NOT_POSSIBLE  The action is not compliant with the SW update state (no downloaded pkg)
  *      - LE_FAULT         If an error occurs
  */
 //--------------------------------------------------------------------------------------------------
