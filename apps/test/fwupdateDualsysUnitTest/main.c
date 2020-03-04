@@ -67,7 +67,7 @@ static void Testpa_fwupdate_Download
     fd = 0;
     pa_fwupdateSimu_SetSystemState(false);
     pa_fwupdate_DisableSyncBeforeUpdate(false);
-    LE_TEST_ASSERT(LE_NOT_PERMITTED == pa_fwupdate_Download(fd), "");
+    LE_TEST_ASSERT(LE_NOT_POSSIBLE == pa_fwupdate_Download(fd), "");
 
     if ((-1 == unlink(TEST_FILE)) && (ENOENT != errno))
     {
