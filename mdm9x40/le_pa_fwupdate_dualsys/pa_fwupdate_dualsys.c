@@ -1490,7 +1490,7 @@ static le_result_t ParsePatchHeaders
  * @return
  *      - LE_OK            The request was accepted
  *      - LE_BAD_PARAMETER The parameter is invalid
- *      - LE_NOT_POSSIBLE  The action is not compliant with the SW update state (no downloaded pkg)
+ *      - LE_UNAVAILABLE   The action is not compliant with the SW update state (no downloaded pkg)
  *      - LE_FAULT         If an error occurs
  */
 //--------------------------------------------------------------------------------------------------
@@ -2688,7 +2688,7 @@ static le_result_t CustSecCheck
  *      - LE_OK              On success
  *      - LE_BAD_PARAMETER   If an input parameter is not valid
  *      - LE_TIMEOUT         After 900 seconds without data received
- *      - LE_NOT_POSSIBLE    The systems are not synced
+ *      - LE_NOT_PERMITTED   The systems are not synced
  *      - LE_UNAVAILABLE     The flash access is not granted for SW update
  *      - LE_CLOSED          File descriptor has been closed before all data have been received
  *      - LE_FAULT           On failure
@@ -2736,7 +2736,7 @@ le_result_t pa_fwupdate_Download
             /* Both systems are not synchronized
              * It's not possible to launch a new package download
              */
-            result = LE_NOT_POSSIBLE;
+            result = LE_NOT_PERMITTED;
             goto error;
         }
         else if (LE_OK != result)
