@@ -91,7 +91,8 @@ typedef enum
     CWE_IMAGE_TYPE_CUSG,                          ///<  User image generic for customer security
     CWE_IMAGE_TYPE_KEYS,                          ///<  OEM keystore file
     CWE_IMAGE_TYPE_DCFG,                          ///<  Device Config Image
-    CWE_IMAGE_TYPE_MAX  = CWE_IMAGE_TYPE_DCFG,    ///<  End of list
+    CWE_IMAGE_TYPE_TAOP,                          ///<  Trustzone, security and power management related images
+    CWE_IMAGE_TYPE_MAX  = CWE_IMAGE_TYPE_TAOP,    ///<  End of list
     CWE_IMAGE_TYPE_COUNT,                         ///<  Number of entries in list
 }
 cwe_ImageType_t;
