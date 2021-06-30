@@ -1216,7 +1216,8 @@ static le_result_t ParseCweHeader
     if ((CurrentCweHeader.imageType != CWE_IMAGE_TYPE_APPL)
         && (CurrentCweHeader.imageType != CWE_IMAGE_TYPE_MODM)
         && (CurrentCweHeader.imageType != CWE_IMAGE_TYPE_SPKG)
-        && (CurrentCweHeader.imageType != CWE_IMAGE_TYPE_BOOT))
+        && (CurrentCweHeader.imageType != CWE_IMAGE_TYPE_BOOT)
+        && (CurrentCweHeader.imageType != CWE_IMAGE_TYPE_TAOP))
     {
         if (!(CurrentCweHeader.miscOpts & CWE_MISC_OPTS_DELTAPATCH))
         {
@@ -1532,7 +1533,8 @@ static le_result_t ParseAndStoreData
             if (  (CurrentCweHeader.imageType == CWE_IMAGE_TYPE_APPL)
                || (CurrentCweHeader.imageType == CWE_IMAGE_TYPE_MODM)
                || (CurrentCweHeader.imageType == CWE_IMAGE_TYPE_SPKG)
-               || (CurrentCweHeader.imageType == CWE_IMAGE_TYPE_BOOT))
+               || (CurrentCweHeader.imageType == CWE_IMAGE_TYPE_BOOT)
+               || (CurrentCweHeader.imageType == CWE_IMAGE_TYPE_TAOP))
             {
                 // Do nothing for composite delta image. There should be META image which
                 // will contain its original header, META processing function should take
